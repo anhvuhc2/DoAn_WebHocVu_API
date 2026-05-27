@@ -16,6 +16,7 @@ public partial class BangDiem
     public double? DiemThi { get; set; }
 
     public double? DiemTrungBinh { get; set; }
+    public string? XepLoai { get; set; }
 
     public string? NhanXet { get; set; }
 
