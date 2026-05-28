@@ -67,18 +67,40 @@ namespace DoAn_WebHocVu_API.Controllers
         [HttpGet("kiem-tra-phan-cong")]
         public IActionResult KiemTraQuyen(string maGiaoVien, string maLop, string maMon)
         {
-            // Tìm trong bảng Phân công xem có dòng nào khớp không
-            var check = _context.PhanCongGiangDays.Any(p =>
+            // =========================================================================
+            // TẦNG 1: KIỂM TRA GIÁO VIÊN BỘ MÔN (Ưu tiên kiểm tra phân công đích danh)
+            // =========================================================================
+            var laGiaoVienBoMon = _context.PhanCongGiangDays.Any(p =>
                 p.MaGiaoVien == maGiaoVien && p.MaLop == maLop && p.MaMon == maMon);
 
-            if (check)
+            if (laGiaoVienBoMon)
             {
-                return Ok(new { quyen = true });
+                return Ok(new { quyen = true, message = "Hợp lệ: Giáo viên bộ môn được phân công dạy môn này." });
             }
-            else
+
+            // =========================================================================
+            // TẦNG 2: KIỂM TRA GIÁO VIÊN CHỦ NHIỆM (Đặc quyền dạy các môn đại trà)
+            // =========================================================================
+            // Lấy thông tin lớp học ra để check giáo viên chủ nhiệm
+            var lopHoc = _context.LopHocs.FirstOrDefault(l => l.MaLop == maLop);
+
+            if (lopHoc != null && lopHoc.GvchuNhiem == maGiaoVien)
             {
-                return BadRequest(new { quyen = false, message = "Bạn không được phân công dạy môn này ở lớp này!" });
+                // GVCN có quyền dạy mọi môn đại trà, NGOẠI TRỪ các môn chuyên trách biệt lập
+                if (maMon != "ANH" && maMon != "TIN")
+                {
+                    return Ok(new { quyen = true, message = "Hợp lệ: Giáo viên chủ nhiệm có quyền nhập điểm môn đại trà." });
+                }
+                else
+                {
+                    return BadRequest(new { quyen = false, message = "Thao tác bị chặn: Môn này đã có Giáo viên bộ môn chuyên trách đảm nhận!" });
+                }
             }
+
+            // =========================================================================
+            // TẦNG 3: CHẶN ĐỨNG (Không phải GV bộ môn mà cũng chẳng phải GVCN của lớp)
+            // =========================================================================
+            return BadRequest(new { quyen = false, message = "Từ chối truy cập: Bạn không được phân công nhiệm vụ tại lớp này!" });
         }
     } // <--- Đóng lớp TaiKhoanController
 

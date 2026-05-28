@@ -1,3 +1,4 @@
+
 using Microsoft.EntityFrameworkCore;
 using DoAn_WebHocVu_API.Models;
 
@@ -28,8 +29,34 @@ builder.Services.AddAuthentication(options =>
     };
 });
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
-builder.Services.AddOpenApi();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(options =>
+{
+    options.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+    {
+        Name = "Authorization",
+        Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
+        Scheme = "Bearer",
+        BearerFormat = "JWT",
+        In = Microsoft.OpenApi.Models.ParameterLocation.Header,
+        Description = "Nhập trực tiếp Token của Hiệu trưởng vào ô bên dưới:"
+    });
+
+    options.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
+    {
+        {
+            new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+            {
+                Reference = new Microsoft.OpenApi.Models.OpenApiReference
+                {
+                    Type = Microsoft.OpenApi.Models.ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            },
+            new string[] {}
+        }
+    });
+});
+
 // Cấp phép cho Front-end (Cổng 3000) được lấy dữ liệu
 builder.Services.AddCors(options =>
 {
@@ -48,7 +75,7 @@ if (app.Environment.IsDevelopment())
 {
     app.UseSwagger(); // Thêm dòng này
     app.UseSwaggerUI(); // Thêm dòng này
-    app.MapOpenApi();
+    //app.MapOpenApi();
 }
 app.UseCors("ChoPhepReact");
 app.UseAuthentication();
