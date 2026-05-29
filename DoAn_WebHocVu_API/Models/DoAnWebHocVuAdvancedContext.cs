@@ -48,7 +48,7 @@ public partial class DoAnWebHocVuAdvancedContext : DbContext
             entity.HasIndex(e => new { e.MaHs, e.MaMon }, "UQ__BangDiem__B4801474B112227A").IsUnique();
 
             entity.Property(e => e.Id).HasColumnName("ID");
-            entity.Property(e => e.DiemTrungBinh).HasComputedColumnSql("([DiemChuyenCan]*(0.3)+[DiemThi]*(0.7))", true);
+            
             entity.Property(e => e.MaHs)
                 .HasMaxLength(20)
                 .HasColumnName("MaHS");

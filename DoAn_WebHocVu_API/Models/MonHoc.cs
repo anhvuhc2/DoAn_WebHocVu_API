@@ -10,6 +10,7 @@ public partial class MonHoc
     public string TenMon { get; set; } = null!;
 
     public int? SoTinChi { get; set; }
+    public string? LoaiMon { get; set; }
 
     public virtual ICollection<BangDiem> BangDiems { get; set; } = new List<BangDiem>();
 
