@@ -8,7 +8,7 @@ namespace DoAn_WebHocVu_API.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    [Authorize(Roles = "GiaoVien")] // TẤT CẢ GIÁO VIÊN ĐỀU VÀO ĐƯỢC ĐÂY (Thỏa mãn điều kiện XEM ĐIỂM/DANH SÁCH)
+    [Authorize(Roles = "GiaoVien,HieuTruong")] // TẤT CẢ GIÁO VIÊN ĐỀU VÀO ĐƯỢC ĐÂY (Thỏa mãn điều kiện XEM ĐIỂM/DANH SÁCH)
     public class HocSinhController : ControllerBase
     {
         private readonly DoAnWebHocVuAdvancedContext _context;
@@ -85,27 +85,40 @@ namespace DoAn_WebHocVu_API.Controllers
         }
 
         /// <summary>
-        /// API 4: Xóa học sinh (Chỉ GVCN lớp đó mới được xóa)
+        /// API 4: Xóa học sinh (Thực chất là chuyển trạng thái - Soft Delete)
         /// </summary>
         [HttpDelete("{maHS}")]
+        [Authorize(Roles = "GiaoVien")]
         public async Task<IActionResult> DeleteHocSinh(string maHS)
         {
-            var maGiaoVien = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            // 1. Lấy mã giáo viên chắc chắn 100%
+            var maGiaoVien = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
 
-            var hocSinh = await _context.HocSinhs.FirstOrDefaultAsync(h => h.MaHs == maHS);
-            if (hocSinh == null)
-                return NotFound("Không tìm thấy học sinh cần xóa.");
-
-            // Check quyền chủ nhiệm
-            var lopHoc = await _context.LopHocs.FirstOrDefaultAsync(l => l.MaLop == hocSinh.MaLop);
-            if (lopHoc == null || lopHoc.GvchuNhiem != maGiaoVien)
+            if (string.IsNullOrEmpty(maGiaoVien))
             {
-                return StatusCode(403, new { message = $"Bạn không có quyền! Chỉ GVCN của lớp {hocSinh.MaLop} mới được phép xóa học sinh này." });
+                return StatusCode(401, new { message = "Lỗi Token: Không thể lấy được mã giáo viên từ thẻ đăng nhập!" });
             }
 
-            _context.HocSinhs.Remove(hocSinh);
+            // 2. Tìm học sinh
+            var hocSinh = await _context.HocSinhs.FirstOrDefaultAsync(h => h.MaHs == maHS);
+            if (hocSinh == null)
+            {
+                return NotFound("Không tìm thấy học sinh cần xóa.");
+            }
+
+            // 3. Kiểm tra quyền chủ nhiệm lớp (Đã bọc thép bằng Trim và ToUpper)
+            var lopHoc = await _context.LopHocs.FirstOrDefaultAsync(l => l.MaLop == hocSinh.MaLop);
+            if (lopHoc == null || lopHoc.GvchuNhiem?.Trim().ToUpper() != maGiaoVien.Trim().ToUpper())
+            {
+                return StatusCode(403, new { message = $"Bạn không có quyền! Lớp {hocSinh.MaLop} do giáo viên '{lopHoc?.GvchuNhiem}' chủ nhiệm, nhưng bạn đăng nhập bằng '{maGiaoVien}'." });
+            }
+
+            // 4. THẦN THÁNH HÓA: Chuyển trạng thái để bảo toàn điểm số
+            hocSinh.TrangThai = "Đã chuyển trường";
+
             await _context.SaveChangesAsync();
-            return Ok(new { message = $"Thành công! Đã xóa học sinh {maHS} khỏi hệ thống." });
+
+            return Ok(new { message = $"Thành công! Đã chuyển trạng thái hồ sơ của em {hocSinh.HoTen} thành 'Đã chuyển trường'." });
         }
     }
 }

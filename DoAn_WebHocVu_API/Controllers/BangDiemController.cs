@@ -9,7 +9,7 @@ namespace DoAn_WebHocVu_API.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    [Authorize(Roles = "GiaoVien")] // CHỐT CHẶN VÒNG NGOÀI: Phải có thẻ Giáo Viên mới được gọi API này
+    [Authorize(Roles = "GiaoVien,HieuTruong")] // CHỐT CHẶN VÒNG NGOÀI: Phải có thẻ Giáo Viên mới được gọi API này
     public class BangDiemController : ControllerBase
     {
         private readonly DoAnWebHocVuAdvancedContext _context;
@@ -27,10 +27,16 @@ namespace DoAn_WebHocVu_API.Controllers
 
             // 2. Lấy thông tin để đối chiếu
             var monHoc = await _context.MonHocs.FirstOrDefaultAsync(m => m.MaMon == maMon);
-            var hocSinh = await _context.HocSinhs.FirstOrDefaultAsync(h => h.MaHs == maHS);
+            var hocSinh = await _context.HocSinhs.FirstOrDefaultAsync(h => h.MaHs == maHS && h.TrangThai == "Đang học");
 
-            if (monHoc == null || hocSinh == null)
-                return NotFound("Không tìm thấy môn học hoặc học sinh.");
+            if (monHoc == null)
+            {
+                return NotFound("Không tìm thấy môn học.");
+            }
+            if (hocSinh == null)
+            {
+                return BadRequest("Học sinh này không tồn tại hoặc đã chuyển trường/nghỉ học!");
+            }
 
             // 3. THUẬT TOÁN GÁC CỔNG VÒNG TRONG (Kiểm tra chéo)
             bool duocPhepThaoTac = false;

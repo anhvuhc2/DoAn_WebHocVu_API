@@ -14,6 +14,7 @@ public partial class HocSinh
     public string? MaLop { get; set; }
 
     public string? TaiKhoanPhuHuynh { get; set; }
+    public string TrangThai { get; set; } = "Đang học";
 
     public virtual ICollection<BangDiem> BangDiems { get; set; } = new List<BangDiem>();
 

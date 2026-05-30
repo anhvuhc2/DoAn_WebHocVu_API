@@ -16,9 +16,8 @@ namespace DoAn_WebHocVu_API.Controllers
         {
             _context = context;
         }
-
-        // 1. Lấy danh sách tất cả giáo viên để Hiệu trưởng chọn
-        [HttpGet("danh-sach-giao-vien")]
+         // 1. Lấy danh sách tất cả giáo viên để Hiệu trưởng chọn
+        [HttpGet("danh-sach-giao-vien")]   
         public async Task<IActionResult> GetGiaoVien()
         {
             var ds = await _context.TaiKhoans
@@ -27,7 +26,6 @@ namespace DoAn_WebHocVu_API.Controllers
                 .ToListAsync();
             return Ok(ds);
         }
-
         // 2. PHÂN CÔNG CHỦ NHIỆM (Cập nhật bảng LopHoc)
         [HttpPost("phan-cong-chu-nhiem")]
         public async Task<IActionResult> PhanCongChuNhiem(string maLop, string maGVCN)
