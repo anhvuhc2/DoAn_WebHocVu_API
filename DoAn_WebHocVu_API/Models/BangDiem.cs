@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 
 namespace DoAn_WebHocVu_API.Models;
-
 public partial class BangDiem
 {
     public int Id { get; set; }
@@ -11,11 +10,8 @@ public partial class BangDiem
 
     public string? MaMon { get; set; }
 
-    
-
     public double? DiemThi { get; set; }
 
-    
     public string? XepLoai { get; set; }
 
     public string? NhanXet { get; set; }

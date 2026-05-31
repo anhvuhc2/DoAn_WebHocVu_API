@@ -69,12 +69,42 @@ namespace DoAn_WebHocVu_API.Controllers
         /// <summary>
         /// API 1: Xem danh sách toàn bộ tài khoản 
         /// </summary>
+        
         [HttpGet("danh-sach")]
         [Authorize(Roles = "HieuTruong, GiaoVien")]
         public async Task<IActionResult> LayDanhSachTaiKhoan()
         {
-            var danhSach = await _context.TaiKhoans.ToListAsync();
-            return Ok(danhSach);
+            // BƯỚC 1: Lấy dữ liệu an toàn từ Database lên (Vẫn giấu mật khẩu, nhưng lấy thêm TenDangNhap để làm vốn)
+            var danhSachTho = await _context.TaiKhoans
+                .Select(tk => new
+                {
+                    tk.TenDangNhap, // Lấy tạm ra để lát nữa cắt chữ
+                    tk.HoTen,
+                    tk.VaiTro,
+                    PhanCongGiangDays = tk.PhanCongGiangDays.Select(pc => new
+                    {
+                        MaLop = pc.MaLop,
+                        MaMon = pc.MaMon
+                    }).ToList()
+                })
+                .ToListAsync();
+
+            // BƯỚC 2: Chế biến thêm cột "NhiemVu" ngay trên RAM của máy chủ
+            var danhSachHoanThien = danhSachTho.Select(tk => new
+            {
+                HoTen = tk.HoTen,
+                VaiTro = tk.VaiTro,
+
+                // THUẬT TOÁN ĐỌC TÊN: 
+                // Nếu Tên đăng nhập bắt đầu bằng chữ "GVCN" -> Cắt bỏ 4 chữ đầu, lấy phần đuôi ghép vào
+                NhiemVu = tk.TenDangNhap.StartsWith("GVCN")
+                          ? $"Giáo viên chủ nhiệm {tk.TenDangNhap.Substring(4)}"
+                          : (tk.PhanCongGiangDays.Count > 0 ? "Giáo viên bộ môn" : "Chưa phân công"),
+
+                PhanCongGiangDays = tk.PhanCongGiangDays
+            });
+
+            return Ok(danhSachHoanThien);
         }
 
         /// <summary>
