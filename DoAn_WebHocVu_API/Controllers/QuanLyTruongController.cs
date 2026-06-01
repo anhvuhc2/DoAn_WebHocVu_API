@@ -52,5 +52,37 @@ namespace DoAn_WebHocVu_API.Controllers
             await _context.SaveChangesAsync();
             return Ok(new { message = "Phân công giáo viên bộ môn thành công!" });
         }
+        /// <summary>
+        /// API: Hiệu trưởng cấp lại mật khẩu mặc định (123456) cho giáo viên bị quên
+        /// </summary>
+        [HttpPut("reset-mat-khau/{tenDangNhap}")]
+        [Authorize(Roles = "HieuTruong")]
+        public async Task<IActionResult> ResetMatKhauGiaoVien(string tenDangNhap)
+        {
+            var taiKhoan = await _context.TaiKhoans.FirstOrDefaultAsync(t => t.TenDangNhap == tenDangNhap);
+
+            if (taiKhoan == null)
+            {
+                return NotFound(new { message = $"Không tìm thấy tài khoản {tenDangNhap} trong hệ thống." });
+            }
+
+            if (taiKhoan.VaiTro == "HieuTruong")
+            {
+                return BadRequest(new { message = "Không thể tự reset mật khẩu của tài khoản quản trị cấp cao." });
+            }
+
+            // Cấp lại mật khẩu mặc định
+            taiKhoan.MatKhau = "123456";
+
+            _context.TaiKhoans.Update(taiKhoan);
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                message = $"Đã reset mật khẩu của {tenDangNhap} thành công!",
+                matKhauMoi = "123456",
+                luuY = "Vui lòng yêu cầu giáo viên đăng nhập và đổi mật khẩu ngay lập tức."
+            });
+        }
     }
 }

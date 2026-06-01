@@ -228,6 +228,62 @@ namespace DoAn_WebHocVu_API.Controllers
             return Ok(lichDay);
         }
 
+        /// <summary>
+        /// API: Cấp lại mật khẩu mặc định (123456) cho Phụ huynh (Đã chốt chặn quyền GVCN)
+        /// </summary>
+        [HttpPut("reset-mat-khau-phu-huynh/{maHs}")]
+        [Authorize(Roles = "GiaoVien,HieuTruong")]
+        public async Task<IActionResult> ResetMatKhauPhuHuynh(string maHs)
+        {
+            // Lấy thông tin người đang đăng nhập
+            var maNguoiDung = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            var vaiTro = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+
+            // 1. Tìm thông tin học sinh
+            var hocSinh = await _context.HocSinhs.FirstOrDefaultAsync(h => h.MaHs == maHs);
+            if (hocSinh == null)
+            {
+                return NotFound(new { message = "Không tìm thấy mã học sinh này!" });
+            }
+
+            // --- BƯỚC RÀO CHẮN AN NINH ---
+            var lopHoc = await _context.LopHocs.FirstOrDefaultAsync(l => l.MaLop == hocSinh.MaLop);
+            // Nếu là Giáo viên thì bắt buộc phải là GVCN của lớp này mới được phép
+            if (lopHoc != null && vaiTro != "HieuTruong")
+            {
+                if (lopHoc.GvchuNhiem?.Trim().ToUpper() != maNguoiDung?.Trim().ToUpper())
+                {
+                    return StatusCode(403, new { message = $"TỪ CHỐI: Bạn không phải Giáo viên chủ nhiệm của lớp {lopHoc.TenLop}. Chỉ GVCN mới có quyền reset mật khẩu cho phụ huynh lớp mình!" });
+                }
+            }
+
+            // 2. Kiểm tra xem phụ huynh em này đã có tài khoản chưa
+            if (string.IsNullOrEmpty(hocSinh.TaiKhoanPhuHuynh))
+            {
+                return BadRequest(new { message = $"Phụ huynh của em {hocSinh.HoTen} chưa được cấp tài khoản để reset!" });
+            }
+
+            // 3. Tìm đúng tài khoản đó trong bảng TaiKhoan
+            var taiKhoan = await _context.TaiKhoans.FirstOrDefaultAsync(t => t.TenDangNhap == hocSinh.TaiKhoanPhuHuynh);
+            if (taiKhoan == null)
+            {
+                return NotFound(new { message = "Lỗi hệ thống: Tài khoản tồn tại ở bảng học sinh nhưng không có trong bảng tài khoản." });
+            }
+
+            // 4. Reset về mặc định
+            taiKhoan.MatKhau = "123456";
+
+            _context.TaiKhoans.Update(taiKhoan);
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                message = $"Đã reset mật khẩu cho phụ huynh em {hocSinh.HoTen} thành công!",
+                tenDangNhap = taiKhoan.TenDangNhap,
+                matKhauMoi = "123456",
+                luuY = "GVCN vui lòng nhắc phụ huynh đổi mật khẩu ngay sau khi đăng nhập."
+            });
+        }
     } // <--- Đóng lớp TaiKhoanController
 
     // Lớp phụ dùng để hứng dữ liệu Tài khoản/Mật khẩu do React gửi lên
@@ -237,4 +293,5 @@ namespace DoAn_WebHocVu_API.Controllers
         public string MatKhau { get; set; } = null!;
 
     }
+
 } // <--- Đóng namespace

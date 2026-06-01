@@ -12,6 +12,7 @@ public partial class TuongTac
     public string? TenDangNhap { get; set; }
 
     public string NoiDung { get; set; } = null!;
+    public string? TrangThai { get; set; }
 
     public DateTime? ThoiGian { get; set; }
 

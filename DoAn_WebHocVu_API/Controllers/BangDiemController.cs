@@ -120,12 +120,12 @@ namespace DoAn_WebHocVu_API.Controllers
 
             return Ok(bangDiem);
         }
-    
-    /// <summary>
+
+        /// <summary>
         /// API: Xuất Bảng Điểm Tổng (Chỉ GVCN mới được xuất)
         /// </summary>
         [HttpGet("xuat-bang-diem-tong/{maLop}")]
-        [Authorize(Roles = "GiaoVien,HieuTruong")]
+        [Authorize(Roles = "GiaoVien")]
         public async Task<IActionResult> XuatBangDiemTong(string maLop)
         {
             // BƯỚC 1: LẤY THÔNG TIN VÀ KIỂM TRA QUYỀN
@@ -134,13 +134,11 @@ namespace DoAn_WebHocVu_API.Controllers
 
             if (lopHoc == null) return NotFound(new { message = "Không tìm thấy lớp học này!" });
 
-            // Nếu không phải hiệu trưởng thì bắt buộc phải là GVCN của lớp này
-            var vaiTro = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
-            if (vaiTro != "HieuTruong" && lopHoc.GvchuNhiem?.Trim().ToUpper() != maNguoiDung?.Trim().ToUpper())
+            // Rào chắn tuyệt đối: Chỉ cho phép đúng GVCN của lớp này
+            if (lopHoc.GvchuNhiem?.Trim().ToUpper() != maNguoiDung?.Trim().ToUpper())
             {
-                return StatusCode(403, new { message = $"TỪ CHỐI: Chỉ Giáo viên chủ nhiệm mới được quyền xuất điểm tổng của lớp {lopHoc.TenLop}." });
+                return StatusCode(403, new { message = $"TỪ CHỐI: Chỉ Giáo viên chủ nhiệm mới được quyền xuất điểm của lớp {lopHoc.TenLop}." });
             }
-
             // BƯỚC 2: CHUẨN BỊ DỮ LIỆU
             var danhSachHocSinh = await _context.HocSinhs.Where(h => h.MaLop == maLop).ToListAsync();
             var maHocSinhs = danhSachHocSinh.Select(h => h.MaHs).ToList();
@@ -291,5 +289,106 @@ namespace DoAn_WebHocVu_API.Controllers
 
             return Ok(new { message = "Dữ liệu đầy đủ hợp lệ!", data = ketQuaXuat });
         }
+        /// <summary>
+        /// <summary>
+        /// API: Gửi thông báo điểm cho phụ huynh qua Zalo / SMS (Đã chốt chặn logic quy trình)
+        /// </summary>
+        [HttpPost("gui-thong-bao-diem/{maLop}")]
+        [Authorize(Roles = "GiaoVien")]
+        public async Task<IActionResult> GuiThongBaoDiem(string maLop)
+        {
+            var maNguoiDung = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            var lopHoc = await _context.LopHocs.FirstOrDefaultAsync(l => l.MaLop == maLop);
+
+            if (lopHoc == null) return NotFound(new { message = "Không tìm thấy lớp học này!" });
+
+            // Rào chắn tuyệt đối: Chỉ cho phép đúng GVCN của lớp này
+            if (lopHoc.GvchuNhiem?.Trim().ToUpper() != maNguoiDung?.Trim().ToUpper())
+            {
+                return StatusCode(403, new { message = $"TỪ CHỐI: Chỉ Giáo viên chủ nhiệm mới được quyền gửi thông báo cho lớp {lopHoc.TenLop}." });
+            }
+
+            // --- BƯỚC 1: LỌC MÔN HỌC THEO KHỐI LỚP (Giống API Xuất điểm) ---
+            var danhSachHocSinh = await _context.HocSinhs.Where(h => h.MaLop == maLop).ToListAsync();
+            var maHocSinhs = danhSachHocSinh.Select(h => h.MaHs).ToList();
+            var danhSachDiem = await _context.BangDiems.Where(b => maHocSinhs.Contains(b.MaHs)).ToListAsync();
+            var tatCaMon = await _context.MonHocs.ToListAsync();
+
+            bool laKhoi123 = maLop.Contains("1") || maLop.Contains("2") || maLop.Contains("3");
+            var maMonChuyen = await _context.PhanCongGiangDays.Where(pc => pc.MaLop == maLop).Select(pc => pc.MaMon).ToListAsync();
+
+            var danhSachMonHoc = tatCaMon.Where(m => {
+                var ten = m.TenMon?.Trim().ToLower() ?? "";
+                if (maMonChuyen.Contains(m.MaMon)) return true;
+                if (ten.Contains("toán") || ten.Contains("tiếng việt") || ten.Contains("đạo đức") || ten.Contains("trải nghiệm")) return true;
+                if (laKhoi123 && ten.Contains("tự nhiên và xã hội")) return true;
+                if (!laKhoi123 && (ten.Contains("khoa học") || ten.Contains("lịch sử") || ten.Contains("địa lí"))) return true;
+                return false;
+            }).ToList();
+
+            var danhSachNgoaiLe = new List<string> { "âm nhạc", "thể dục", "mĩ thuật", "hoạt động trải nghiệm", "đạo đức", "tự nhiên và xã hội" };
+
+            // --- BƯỚC 2: QUÉT LỖ HỔNG (CHỐT CHẶN BẮT BUỘC) ---
+            var danhSachLoi = new List<string>();
+            foreach (var hs in danhSachHocSinh)
+            {
+                if (hs.TrangThai == "Đã chuyển trường") continue;
+
+                foreach (var mon in danhSachMonHoc)
+                {
+                    var diemCuaHs = danhSachDiem.FirstOrDefault(d => d.MaHs == hs.MaHs && d.MaMon == mon.MaMon);
+                    bool laMonNhanXet = danhSachNgoaiLe.Contains(mon.TenMon?.Trim().ToLower() ?? "");
+
+                    if (diemCuaHs == null ||
+                       (laMonNhanXet && string.IsNullOrEmpty(diemCuaHs.XepLoai)) ||
+                       (!laMonNhanXet && diemCuaHs.DiemThi == null))
+                    {
+                        danhSachLoi.Add($"Em {hs.HoTen} bị trống điểm môn {mon.TenMon}");
+                    }
+                }
+            }
+
+            // NẾU CÓ LỖI CHƯA NHẬP ĐỦ -> CHẶN ĐỨNG QUY TRÌNH GỬI TIN NHẮN
+            if (danhSachLoi.Count > 0)
+            {
+                return BadRequest(new
+                {
+                    message = "CHƯA THỂ GỬI THÔNG BÁO! Bảng điểm của lớp chưa được nhập hoàn tất.",
+                    chiTietLoi = danhSachLoi
+                });
+            }
+
+            // --- BƯỚC 3: GỬI TIN NHẮN & PHÂN LUỒNG ZALO/SMS ---
+            var ketQuaGui = new List<object>();
+            int tongZalo = 0, tongSMS = 0, tongLoi = 0;
+
+            foreach (var hs in danhSachHocSinh)
+            {
+                if (hs.TrangThai == "Đã chuyển trường") continue;
+
+                var chiTietDiem = new List<string>();
+                foreach (var mon in danhSachMonHoc)
+                {
+                    var d = danhSachDiem.FirstOrDefault(x => x.MaHs == hs.MaHs && x.MaMon == mon.MaMon);
+                    string diemHienThi = d?.DiemThi != null ? d.DiemThi.ToString() : d?.XepLoai ?? "";
+                    chiTietDiem.Add($"{mon.TenMon}: {diemHienThi}");
+                }
+
+                string noiDungTinNhan = $"Trường TH thông báo điểm của em {hs.HoTen}: {string.Join(", ", chiTietDiem)}.";
+
+                string sdt = hs.SdtPhuHuynh?.Trim();
+                string kenhGui = "";
+                string trangThaiGui = "";
+
+                if (hs.UuTienZalo == true) { kenhGui = "Zalo ZNS"; trangThaiGui = "Thành công"; tongZalo++; }
+                else if (!string.IsNullOrEmpty(sdt)) { kenhGui = "Tin nhắn SMS"; trangThaiGui = "Thành công"; tongSMS++; }
+                else { kenhGui = "Không có thông tin liên lạc"; trangThaiGui = "LỖI: Thiếu SĐT và không đăng ký Zalo"; tongLoi++; }
+
+                ketQuaGui.Add(new { MaHs = hs.MaHs, HoTen = hs.HoTen, SoDienThoai = sdt ?? "Trống", KenhLienLac = kenhGui, NoiDung = noiDungTinNhan, KetQua = trangThaiGui });
+            }
+
+            return Ok(new { message = "Đã hoàn tất tiến trình phân luồng gửi thông báo!", thongKe = new { DaGuiZalo = tongZalo, DaGuiSMS = tongSMS, ChuaGuiDuoc = tongLoi }, chiTiet = ketQuaGui });
+        }
+    
     }
 }
