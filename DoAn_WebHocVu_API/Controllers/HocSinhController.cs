@@ -21,13 +21,16 @@ namespace DoAn_WebHocVu_API.Controllers
         /// <summary>
         /// API 1: Xem danh sách học sinh (Mọi giáo viên đều xem được)
         /// </summary>
-        [HttpGet]
-        public async Task<IActionResult> GetHocSinhs()
+        [HttpGet("theo-lop/{maLop}")]
+        public async Task<IActionResult> GetHocSinhTheoLop(string maLop)
         {
-            var danhSach = await _context.HocSinhs.ToListAsync();
+            // Lọc danh sách học sinh theo mã lớp được truyền lên từ giao diện
+            var danhSach = await _context.HocSinhs
+                .Where(hs => hs.MaLop == maLop)
+                .ToListAsync();
+
             return Ok(danhSach);
         }
-
         /// <summary>
         /// API 2: Thêm mới học sinh (Chỉ GVCN lớp đó mới được thêm)
         /// </summary>

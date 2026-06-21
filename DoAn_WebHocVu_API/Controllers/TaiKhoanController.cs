@@ -284,7 +284,7 @@ namespace DoAn_WebHocVu_API.Controllers
                 luuY = "GVCN vui lòng nhắc phụ huynh đổi mật khẩu ngay sau khi đăng nhập."
             });
         }
-    } // <--- Đóng lớp TaiKhoanController
+  
 
     // Lớp phụ dùng để hứng dữ liệu Tài khoản/Mật khẩu do React gửi lên
     public class LoginRequest
@@ -293,5 +293,8 @@ namespace DoAn_WebHocVu_API.Controllers
         public string MatKhau { get; set; } = null!;
 
     }
+        
+
+} // <--- ĐÂY LÀ DẤU NGOẶC NHỌN ĐÓNG CUỐI CÙNG CỦA CLASS TAIKHOANCONTROLLER
 
 } // <--- Đóng namespace

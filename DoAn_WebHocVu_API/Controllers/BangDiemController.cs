@@ -19,15 +19,18 @@ namespace DoAn_WebHocVu_API.Controllers
             _context = context;
         }
 
+        // ====================================================================
+        // CHỨC NĂNG: NHẬP ĐIỂM / XẾP LOẠI LINH HOẠT THEO TIỂU HỌC (ĐÃ KIỂM TRA PHÂN QUYỀN)
+        // ====================================================================
         [HttpPost("nhap-diem")]
-        public async Task<IActionResult> NhapDiem(string maHS, string maMon, float diemMoi)
+        public async Task<IActionResult> NhapDiem([FromBody] NhapDiemDto model)
         {
-            // 1. Lấy mã giáo viên đang đăng nhập từ Token (Giả sử bạn lưu Username vào Name)
-            var maGiaoVien = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            // 1. Lấy mã giáo viên đang đăng nhập từ Token
+            var maGiaoVien = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
 
             // 2. Lấy thông tin để đối chiếu
-            var monHoc = await _context.MonHocs.FirstOrDefaultAsync(m => m.MaMon == maMon);
-            var hocSinh = await _context.HocSinhs.FirstOrDefaultAsync(h => h.MaHs == maHS && h.TrangThai == "Đang học");
+            var monHoc = await _context.MonHocs.FirstOrDefaultAsync(m => m.MaMon == model.MaMon);
+            var hocSinh = await _context.HocSinhs.FirstOrDefaultAsync(h => h.MaHs == model.MaHS && h.TrangThai == "Đang học");
 
             if (monHoc == null)
             {
@@ -38,7 +41,7 @@ namespace DoAn_WebHocVu_API.Controllers
                 return BadRequest("Học sinh này không tồn tại hoặc đã chuyển trường/nghỉ học!");
             }
 
-            // 3. THUẬT TOÁN GÁC CỔNG VÒNG TRONG (Kiểm tra chéo)
+            // 3. THUẬT TOÁN GÁC CỔNG VỒNG TRONG (Kiểm tra chéo quyền của GV)
             bool duocPhepThaoTac = false;
 
             if (monHoc.LoaiMon == "Cơ bản")
@@ -54,7 +57,7 @@ namespace DoAn_WebHocVu_API.Controllers
             {
                 // LUẬT 2: Môn chuyên -> Lục bảng Phân Công Giảng Dạy xem có tên không
                 var duocPhanCong = await _context.PhanCongGiangDays
-                    .AnyAsync(pc => pc.MaGiaoVien == maGiaoVien && pc.MaLop == hocSinh.MaLop && pc.MaMon == maMon);
+                    .AnyAsync(pc => pc.MaGiaoVien == maGiaoVien && pc.MaLop == hocSinh.MaLop && pc.MaMon == model.MaMon);
 
                 if (duocPhanCong)
                 {
@@ -62,44 +65,63 @@ namespace DoAn_WebHocVu_API.Controllers
                 }
             }
 
-            // 4. Phán quyết cuối cùng
+            // 4. Phán quyết cuối cùng về quyền hạn
             if (!duocPhepThaoTac)
             {
                 return StatusCode(403, new { message = "Lỗi phân quyền: Bạn không có quyền nhập điểm cho môn này của lớp này!" });
             }
 
-            // --- NẾU CODE CHẠY ĐƯỢC XUỐNG ĐÂY NGHĨA LÀ ĐÃ QUA CỬA BẢO MẬT ---
-            // (Bạn sẽ viết code thêm/sửa/lưu dữ liệu vào bảng BangDiem ở khu vực này)
+            // 5. NGHIỆP VỤ PHÂN LOẠI MÔN THEO THÔNG TƯ 27
+            var cacMonNhanXet = new List<string> { "TNXH", "GDTC", "HDTN", "HĐTN", "DD" };
 
+            if (cacMonNhanXet.Contains(model.MaMon.ToUpper()))
+            {
+                // Nếu là môn nhận xét (lớp 1,2,3) -> Bắt buộc cột điểm phải trống (NULL)
+                model.DiemThi = null;
+                if (string.IsNullOrEmpty(model.XepLoai))
+                {
+                    return BadRequest(new { message = $"Môn {model.MaMon} là môn đánh giá nhận xét, bắt buộc phải nhập xếp loại (H/T/C)!" });
+                }
+            }
+            else
+            {
+                // Nếu là môn tính điểm (Toán, TV...) -> Bắt buộc phải điền điểm số
+                if (model.DiemThi == null)
+                {
+                    return BadRequest(new { message = $"Môn {model.MaMon} yêu cầu phải có điểm số, không được bỏ trống!" });
+                }
+            }
 
-            // 5. Tìm xem học sinh này đã có điểm môn này trong bảng chưa
-            var bangDiem = await _context.BangDiems
-                .FirstOrDefaultAsync(b => b.MaHs == maHS && b.MaMon == maMon);
+            // 6. Tiến hành kiểm tra và lưu vết vào bảng dữ liệu
+            var bangDiem = await _context.BangDiems.FirstOrDefaultAsync(b => b.MaHs == model.MaHS && b.MaMon == model.MaMon);
 
             if (bangDiem == null)
             {
-                // Nếu chưa có điểm -> Tạo dòng điểm mới (Thêm)
-                bangDiem = new BangDiem
+                // Nếu chưa có điểm -> Tạo dòng mới (Thêm)
+                bangDiem = new DoAn_WebHocVu_API.Models.BangDiem
                 {
-                    MaHs = maHS,
-                    MaMon = maMon,
-                    DiemThi = diemMoi, // Lưu ý: Tùy biến cột này theo đúng tên cột điểm trong SQL của bạn
+                    MaHs = model.MaHS,
+                    MaMon = model.MaMon,
+                    DiemThi = model.DiemThi,
+                    XepLoai = model.XepLoai?.ToUpper(),
+                    NhanXet = model.NhanXet,
                     NgayCapNhat = DateTime.Now
                 };
                 _context.BangDiems.Add(bangDiem);
             }
             else
             {
-                // Nếu đã có điểm rồi -> Ghi đè điểm mới (Sửa)
-                bangDiem.DiemThi = diemMoi;
+                // Nếu đã có điểm rồi -> Ghi đè dữ liệu cũ (Sửa)
+                bangDiem.DiemThi = model.DiemThi;
+                bangDiem.XepLoai = model.XepLoai?.ToUpper();
+                bangDiem.NhanXet = model.NhanXet;
                 bangDiem.NgayCapNhat = DateTime.Now;
                 _context.BangDiems.Update(bangDiem);
             }
 
-            // 6. Lưu vào Database
+            // 7. Lưu vào Database
             await _context.SaveChangesAsync();
-
-            return Ok(new { message = $"Thành công! Đã cập nhật {diemMoi} điểm cho học sinh {maHS} môn {monHoc.TenMon}." });
+            return Ok(new { message = $"Thành công! Đã cập nhật dữ liệu học tập môn {monHoc.TenMon} cho học sinh {hocSinh.HoTen}." });
         }
         [HttpGet("xem-diem/{maHS}")]
         public async Task<IActionResult> XemDiem(string maHS)
@@ -158,7 +180,8 @@ namespace DoAn_WebHocVu_API.Controllers
                                             .ToListAsync();
 
             // 4. BỘ LỌC TỰ ĐỘNG CHỌN MÔN (Kết hợp Đại trà + Chuyên)
-            var danhSachMonHoc = tatCaMon.Where(m => {
+            var danhSachMonHoc = tatCaMon.Where(m =>
+            {
                 var ten = m.TenMon?.Trim().ToLower() ?? "";
 
                 // Tiêu chí 1: Nếu là môn chuyên đã được phân công -> Lấy!
@@ -221,10 +244,12 @@ namespace DoAn_WebHocVu_API.Controllers
             }
 
             // Nếu dữ liệu sạch 100%, tiến hành gom dữ liệu xuất ra
-            var ketQuaXuat = danhSachHocSinh.Select(hs => {
+            var ketQuaXuat = danhSachHocSinh.Select(hs =>
+            {
 
                 // 1. Gom đầy đủ điểm và xếp loại
-                var chiTietDiemHs = danhSachMonHoc.Select(mon => {
+                var chiTietDiemHs = danhSachMonHoc.Select(mon =>
+                {
                     var d = danhSachDiem.FirstOrDefault(x => x.MaHs == hs.MaHs && x.MaMon == mon.MaMon);
                     return new
                     {
@@ -278,7 +303,8 @@ namespace DoAn_WebHocVu_API.Controllers
                     HoTen = hs.HoTen,
                     TrangThai = hs.TrangThai,
                     KhenThuong = khenThuong,
-                    ChiTietDiem = chiTietDiemHs.Select(d => new {
+                    ChiTietDiem = chiTietDiemHs.Select(d => new
+                    {
                         d.TenMon,
                         d.DiemThi,
                         d.XepLoai,
@@ -317,7 +343,8 @@ namespace DoAn_WebHocVu_API.Controllers
             bool laKhoi123 = maLop.Contains("1") || maLop.Contains("2") || maLop.Contains("3");
             var maMonChuyen = await _context.PhanCongGiangDays.Where(pc => pc.MaLop == maLop).Select(pc => pc.MaMon).ToListAsync();
 
-            var danhSachMonHoc = tatCaMon.Where(m => {
+            var danhSachMonHoc = tatCaMon.Where(m =>
+            {
                 var ten = m.TenMon?.Trim().ToLower() ?? "";
                 if (maMonChuyen.Contains(m.MaMon)) return true;
                 if (ten.Contains("toán") || ten.Contains("tiếng việt") || ten.Contains("đạo đức") || ten.Contains("trải nghiệm")) return true;
@@ -347,7 +374,6 @@ namespace DoAn_WebHocVu_API.Controllers
                     }
                 }
             }
-
             // NẾU CÓ LỖI CHƯA NHẬP ĐỦ -> CHẶN ĐỨNG QUY TRÌNH GỬI TIN NHẮN
             if (danhSachLoi.Count > 0)
             {
@@ -357,38 +383,67 @@ namespace DoAn_WebHocVu_API.Controllers
                     chiTietLoi = danhSachLoi
                 });
             }
-
-            // --- BƯỚC 3: GỬI TIN NHẮN & PHÂN LUỒNG ZALO/SMS ---
-            var ketQuaGui = new List<object>();
-            int tongZalo = 0, tongSMS = 0, tongLoi = 0;
-
+            // --- BƯỚC 3: TẠO THÔNG BÁO TỔNG CHO HIỆU TRƯỞNG (BẢNG KEHOACHLOP) ---
+            // Tự động sinh ra một Mã Kế Hoạch duy nhất (ví dụ: BD_L01_20260621213000)
+    
+            var keHoachBaoDiem = new DoAn_WebHocVu_API.Models.KeHoachLop
+            {
+                
+                MaLop = maLop,
+                TieuDe = $"Báo điểm định kỳ lớp {lopHoc.TenLop}",
+                NoiDung = $"Hệ thống đã gửi tự động bảng điểm chi tiết đến từng phụ huynh của lớp {lopHoc.TenLop}. Kính mong ban giám hiệu theo dõi tiến độ.",
+                LoaiThongBao = "Báo điểm", // Khớp 100% với chữ trong CHECK CONSTRAINT dưới SQL
+                NgayDang = DateTime.Now,
+                NguoiDang = maNguoiDung // Mã của GVCN đang đăng nhập
+            };
+            // Thêm vào context chuẩn bị lưu
+            _context.KeHoachLops.Add(keHoachBaoDiem);
+            await _context.SaveChangesAsync();
+            // --- BƯỚC 4: TỰ ĐỘNG LƯU THÔNG BÁO CÁ NHÂN VÀO BẢNG TUONGTAC ---
             foreach (var hs in danhSachHocSinh)
             {
                 if (hs.TrangThai == "Đã chuyển trường") continue;
-
                 var chiTietDiem = new List<string>();
                 foreach (var mon in danhSachMonHoc)
                 {
                     var d = danhSachDiem.FirstOrDefault(x => x.MaHs == hs.MaHs && x.MaMon == mon.MaMon);
-                    string diemHienThi = d?.DiemThi != null ? d.DiemThi.ToString() : d?.XepLoai ?? "";
+                    string diemHienThi = d?.DiemThi != null ? d?.DiemThi.ToString() : d?.XepLoai ?? "";
                     chiTietDiem.Add($"{mon.TenMon}: {diemHienThi}");
                 }
-
                 string noiDungTinNhan = $"Trường TH thông báo điểm của em {hs.HoTen}: {string.Join(", ", chiTietDiem)}.";
+                string maTaiKhoanPhuHuynh = ("PH_" + hs.MaHs.Trim()).Trim();
+                var taiKhoanPhuHuynh = await _context.TaiKhoans
+                    .FirstOrDefaultAsync(tk => tk.TenDangNhap == maTaiKhoanPhuHuynh);
 
-                string sdt = hs.SdtPhuHuynh?.Trim();
-                string kenhGui = "";
-                string trangThaiGui = "";
+                string? tkHienTai = taiKhoanPhuHuynh != null ? taiKhoanPhuHuynh.TenDangNhap : null;
+                if (tkHienTai != null)
+                {
+                    var tuongTacMoi = new DoAn_WebHocVu_API.Models.TuongTac
+                    {
+                        MaKeHoach = keHoachBaoDiem.MaKeHoach,
+                        TenDangNhap = tkHienTai, // Đã có dấu phẩy ngăn cách chuẩn xác
+                        NoiDung = $"[Thông báo cá nhân] - {noiDungTinNhan}",
+                        ThoiGian = DateTime.Now,
+                        TrangThai = "Chưa xem"
+                    };
 
-                if (hs.UuTienZalo == true) { kenhGui = "Zalo ZNS"; trangThaiGui = "Thành công"; tongZalo++; }
-                else if (!string.IsNullOrEmpty(sdt)) { kenhGui = "Tin nhắn SMS"; trangThaiGui = "Thành công"; tongSMS++; }
-                else { kenhGui = "Không có thông tin liên lạc"; trangThaiGui = "LỖI: Thiếu SĐT và không đăng ký Zalo"; tongLoi++; }
+                    // Đưa dữ liệu vào Context chuẩn bị lưu
+                    _context.TuongTacs.Add(tuongTacMoi);
+                }
 
-                ketQuaGui.Add(new { MaHs = hs.MaHs, HoTen = hs.HoTen, SoDienThoai = sdt ?? "Trống", KenhLienLac = kenhGui, NoiDung = noiDungTinNhan, KetQua = trangThaiGui });
+                // Lưu TẤT CẢ thay đổi (bao gồm cả KeHoachLop và hàng loạt TuongTac) xuống Database cùng một lúc
+                await _context.SaveChangesAsync();
             }
 
-            return Ok(new { message = "Đã hoàn tất tiến trình phân luồng gửi thông báo!", thongKe = new { DaGuiZalo = tongZalo, DaGuiSMS = tongSMS, ChuaGuiDuoc = tongLoi }, chiTiet = ketQuaGui });
+            return Ok(new { message = $"Đã gửi thông báo điểm thành công cho lớp {lopHoc.TenLop}. Ban giám hiệu có thể theo dõi tại mục Kế hoạch lớp!" });
         }
-    
+        public class NhapDiemDto
+        {
+            public string? MaHS { get; set; }
+            public string? MaMon { get; set; }
+            public float? DiemThi { get; set; } // Dấu ? cho phép truyền null từ Swagger lên
+            public string? XepLoai { get; set; }
+            public string? NhanXet { get; set; }
+        }
     }
 }

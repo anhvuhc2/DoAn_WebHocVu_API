@@ -30,11 +30,24 @@ namespace DoAn_WebHocVu_API.Controllers
         [HttpPost("phan-cong-chu-nhiem")]
         public async Task<IActionResult> PhanCongChuNhiem(string maLop, string maGVCN)
         {
+            // 1. KIỂM TRA LỚP CÓ TỒN TẠI KHÔNG
             var lop = await _context.LopHocs.FindAsync(maLop);
             if (lop == null) return NotFound(new { message = "Không tìm thấy lớp học" });
 
+            // 2. GÁC CỔNG C#: Kiểm tra giáo viên này đã chủ nhiệm lớp khác chưa
+            // (Điều kiện l.MaLop != maLop là để bỏ qua trường hợp cập nhật lại chính lớp đó)
+            var daChuNhiemLopKhac = await _context.LopHocs
+                .AnyAsync(l => l.GvchuNhiem == maGVCN && l.MaLop != maLop);
+
+            if (daChuNhiemLopKhac)
+            {
+                return BadRequest(new { message = $"Giáo viên {maGVCN} hiện đang làm chủ nhiệm cho một lớp khác. Vui lòng chọn người khác!" });
+            }
+
+            // 3. TIẾN HÀNH CẬP NHẬT NẾU HỢP LỆ
             lop.GvchuNhiem = maGVCN;
             await _context.SaveChangesAsync();
+
             return Ok(new { message = $"Đã phân công {maGVCN} làm chủ nhiệm lớp {maLop}" });
         }
 
@@ -47,6 +60,7 @@ namespace DoAn_WebHocVu_API.Controllers
                 p.MaLop == pc.MaLop && p.MaMon == pc.MaMon);
 
             if (tonTai) return BadRequest(new { message = "Môn học này ở lớp này đã có giáo viên dạy rồi!" });
+
 
             _context.PhanCongGiangDays.Add(pc);
             await _context.SaveChangesAsync();
@@ -81,7 +95,7 @@ namespace DoAn_WebHocVu_API.Controllers
             {
                 message = $"Đã reset mật khẩu của {tenDangNhap} thành công!",
                 matKhauMoi = "123456",
-                luuY = "Vui lòng yêu cầu giáo viên đăng nhập và đổi mật khẩu ngay lập tức."
+                luuY = "Vui lòng yêu cầu đăng nhập và đổi mật khẩu ngay lập tức."
             });
         }
     }

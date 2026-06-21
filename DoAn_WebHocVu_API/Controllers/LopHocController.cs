@@ -118,6 +118,16 @@ namespace DoAn_WebHocVu_API.Controllers
                     NguoiDiemDanh = maGvDangDangNhap
                 };
 
+                // CHỐT CHẶN: Kiểm tra xem học sinh này đã bị điểm danh hôm nay chưa
+                var daVangRoi = await _context.DiemDanhs
+                .AnyAsync(dd => dd.MaHs == hs.MaHs && dd.NgayVang == ngayHienTai);
+
+                if (daVangRoi)
+                {
+                    // Nếu điểm danh rồi thì ném vào danh sách lỗi, không cho Add xuống DB
+                    danhSachLoi.Add(hs.MaHs + " (Bị trùng)");
+                    continue; // Bỏ qua em này, tiếp tục vòng lặp cho các em khác
+                }
                 _context.DiemDanhs.Add(diemDanhMoi);
                 soLuongThanhCong++;
             }
@@ -126,7 +136,7 @@ namespace DoAn_WebHocVu_API.Controllers
 
             if (danhSachLoi.Count > 0)
             {
-                return Ok(new { message = $"Đã điểm danh thành công {soLuongThanhCong} học sinh. LƯU Ý: Đã từ chối {danhSachLoi.Count} học sinh vì không thuộc lớp này ({string.Join(", ", danhSachLoi)})." });
+                return Ok(new { message = $"Đã điểm danh thành công {soLuongThanhCong} học sinh. LƯU Ý: Đã từ chối {danhSachLoi.Count} học sinh vì không thuộc lớp này hoặc bị trùng({string.Join(", ", danhSachLoi)})." });
             }
 
             return Ok(new { message = $"Tuyệt vời! Đã ghi nhận thành công toàn bộ {soLuongThanhCong} học sinh vắng mặt của lớp {lopHoc.TenLop}." });
