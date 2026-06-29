@@ -407,7 +407,22 @@ namespace DoAn_WebHocVu_API.Controllers
                 foreach (var mon in danhSachMonHoc)
                 {
                     var d = danhSachDiem.FirstOrDefault(x => x.MaHs == hs.MaHs && x.MaMon == mon.MaMon);
-                    string diemHienThi = d?.DiemThi != null ? d?.DiemThi.ToString() : d?.XepLoai ?? "";
+                    string diemHienThi = "";
+                    if (d != null)
+                    {
+                        if (d.DiemThi != null && !string.IsNullOrEmpty(d.XepLoai))
+                        {
+                            diemHienThi = $"{d.DiemThi} ({d.XepLoai})"; // Môn có cả điểm và chữ: "6 (H)"
+                        }
+                        else if (d.DiemThi != null)
+                        {
+                            diemHienThi = d.DiemThi.ToString(); // Chỉ có điểm
+                        }
+                        else if (!string.IsNullOrEmpty(d.XepLoai))
+                        {
+                            diemHienThi = d.XepLoai; // Chỉ có chữ: "H"
+                        }
+                    }
                     chiTietDiem.Add($"{mon.TenMon}: {diemHienThi}");
                 }
                 string noiDungTinNhan = $"Trường TH thông báo điểm của em {hs.HoTen}: {string.Join(", ", chiTietDiem)}.";

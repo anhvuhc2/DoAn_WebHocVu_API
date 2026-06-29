@@ -19,10 +19,11 @@ namespace DoAn_WebHocVu_API.Controllers
         }
 
         /// <summary>
-        /// API 1: Xem danh sách học sinh (Mọi giáo viên đều xem được)
+        /// API dành cho Quản trị viên/BGH: Truy xuất toàn bộ hồ sơ lưu trữ của lớp
+        /// Bao gồm cả học sinh đang học và học sinh đã chuyển trường/thôi học để làm báo cáo, thống kê.
         /// </summary>
-        [HttpGet("theo-lop/{maLop}")]
-        public async Task<IActionResult> GetHocSinhTheoLop(string maLop)
+        [HttpGet("truy-xuat-ho-so/{maLop}")]
+        public async Task<IActionResult> TruyXuatHoSoTheoLop(string maLop)
         {
             // Lọc danh sách học sinh theo mã lớp được truyền lên từ giao diện
             var danhSach = await _context.HocSinhs
@@ -52,6 +53,15 @@ namespace DoAn_WebHocVu_API.Controllers
             }
 
             // 4. Nếu đúng là GVCN -> Tiến hành thêm mới
+            // Kiểm tra xem mã tài khoản phụ huynh nhập vào đã tồn tại trong bảng TaiKhoan chưa
+            if (!string.IsNullOrEmpty(hs.TaiKhoanPhuHuynh))
+            {
+                var tkTonTai = await _context.TaiKhoans.AnyAsync(t => t.TenDangNhap == hs.TaiKhoanPhuHuynh);
+                if (!tkTonTai)
+                {
+                    return BadRequest(new { message = $"Thất bại! Tài khoản phụ huynh '{hs.TaiKhoanPhuHuynh}' chưa tồn tại trong hệ thống. Vui lòng tạo tài khoản này trước." });
+                }
+            }
             _context.HocSinhs.Add(hs);
             await _context.SaveChangesAsync();
             return Ok(new { message = $"Thành công! Đã thêm học sinh {hs.HoTen} vào lớp {hs.MaLop}." });

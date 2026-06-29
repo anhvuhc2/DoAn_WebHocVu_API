@@ -46,11 +46,12 @@ namespace DoAn_WebHocVu_API.Controllers
         }
 
         /// <summary>
-        /// 3. Xem danh sách học sinh của 1 lớp (Chỉ lấy những em Đang học)
+        /// API dành cho Giáo viên: Lấy danh sách sĩ số hiện tại của lớp (Chỉ gồm học sinh đang học)
+        /// Phục vụ cho tác vụ hàng ngày: Điểm danh, nhập điểm, gửi thông báo.
         /// </summary>
-        [HttpGet("{maLop}/hoc-sinh")]
+        [HttpGet("{maLop}/danh-sach-hien-tai")]
         [Authorize(Roles = "HieuTruong,GiaoVien")]
-        public async Task<IActionResult> LayHocSinhCuaLop(string maLop)
+        public async Task<IActionResult> LayDanhSachHocSinhHienTai(string maLop)
         {
             // BỔ SUNG ĐIỀU KIỆN: hs.TrangThai == "Đang học"
             var dsHocSinh = await _context.HocSinhs

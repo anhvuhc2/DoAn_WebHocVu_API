@@ -24,4 +24,5 @@ public partial class KeHoachLop
     public virtual TaiKhoan? NguoiDangNavigation { get; set; }
 
     public virtual ICollection<TuongTac> TuongTacs { get; set; } = new List<TuongTac>();
+    public string? FileDinhKem { get; set; }
 }
