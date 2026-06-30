@@ -44,12 +44,13 @@ namespace DoAn_WebHocVu_API.Controllers
 
                 if (hoiMonNhanXet && thacMacDanhGia)
                 {
-                    phanHoiCuaHeThong = "Trợ lý ảo: Dạ thưa phụ huynh, theo Thông tư 27, các môn như Đạo đức, Thể dục, Hoạt động trải nghiệm... được đánh giá qua quan sát biểu hiện trên lớp, không dùng điểm số. Mức H (Hoàn thành) có nghĩa là em đã đạt các yêu cầu cơ bản. Để đạt T (Hoàn thành Tốt) đòi hỏi thêm sự nổi trội trong hoạt động. GVCN sẽ trao đổi chi tiết hơn với anh/chị ạ!";
-                    phanHoi.TrangThai = "Chờ GV xử lý";
+                    phanHoiCuaHeThong = "Trợ lý ảo: Dạ thưa phụ huynh, theo Thông tư 27, các môn như Đạo đức, Thể dục, Hoạt động trải nghiệm... được đánh giá qua quan sát biểu hiện trên lớp, không dùng điểm số. Mức H (Hoàn thành) có nghĩa là em đã đạt các yêu cầu cơ bản. Để hiểu rõ hơn về cách đánh giá này, mời anh/chị tìm hiểu thêm tại văn bản dưới đây ạ.\n\n👉 Chi tiết Thông tư 27: https://thuvienphapluat.vn/van-ban/Giao-duc/Thong-tu-27-2020-TT-BGDDT-Danh-gia-hoc-sinh-tieu-hoc-451792.aspx";
+                    phanHoi.TrangThai = "AI đã trả lời";
+
                 }
                 else if (noiDungThuong.Contains("xếp loại") || noiDungThuong.Contains("điểm h") || noiDungThuong.Contains("điểm t") || noiDungThuong.Contains("điểm c"))
                 {
-                    phanHoiCuaHeThong = "Trợ lý ảo: Dạ thưa phụ huynh, theo Thông tư 27: T là 'Hoàn thành Tốt', H là 'Hoàn thành', và C là 'Chưa hoàn thành' mục tiêu môn học ạ.";
+                    phanHoiCuaHeThong = "Trợ lý ảo: Dạ thưa phụ huynh, theo Thông tư 27: T là 'Hoàn thành Tốt', H là 'Hoàn thành', và C là 'Chưa hoàn thành' mục tiêu môn học. Để hiểu rõ hơn về các mức xếp loại này, mời anh/chị tìm hiểu thêm tại văn bản dưới đây ạ.\n\n👉 Chi tiết Thông tư 27: https://thuvienphapluat.vn/van-ban/Giao-duc/Thong-tu-27-2020-TT-BGDDT-Danh-gia-hoc-sinh-tieu-hoc-451792.aspx";
                     phanHoi.TrangThai = "AI đã trả lời";
                 }
                 else
@@ -71,13 +72,11 @@ namespace DoAn_WebHocVu_API.Controllers
                         phanHoi.TrangThai = "Chờ GV xử lý";
                     }
                 }
-
             // 3. Cập nhật trạng thái thông báo gốc
             var thongBaoGoc = await _context.TuongTacs
                 .FirstOrDefaultAsync(t => t.MaKeHoach == phanHoi.MaKeHoach
                                       && t.TenDangNhap == phanHoi.TenDangNhap
                                       && t.TrangThai == "Chưa xem");
-
             if (thongBaoGoc != null)
             {
                 thongBaoGoc.TrangThai = "Đã phản hồi";
