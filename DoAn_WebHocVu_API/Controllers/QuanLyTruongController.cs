@@ -56,12 +56,32 @@ namespace DoAn_WebHocVu_API.Controllers
         public async Task<IActionResult> PhanCongBoMon(PhanCongGiangDay pc)
         {
             // Kiểm tra xem đã tồn tại phân công này chưa để tránh trùng lặp
-            var tonTai = await _context.PhanCongGiangDays.AnyAsync(p =>
-                p.MaLop == pc.MaLop && p.MaMon == pc.MaMon);
+            // 1. CHỐT CHẶN 1: Kiểm tra xem Lớp này đã có ai dạy môn này chưa
+            var gvDaDayMonNay = await _context.PhanCongGiangDays
+                .FirstOrDefaultAsync(p => p.MaLop == pc.MaLop && p.MaMon == pc.MaMon);
 
-            if (tonTai) return BadRequest(new { message = "Môn học này ở lớp này đã có giáo viên dạy rồi!" });
+            if (gvDaDayMonNay != null)
+            {
+                return BadRequest(new
+                {
+                    message = $"❌ Lỗi: Môn '{pc.MaMon}' ở lớp '{pc.MaLop}' hiện đã được phân công cho giáo viên '{gvDaDayMonNay.MaGiaoVien}' phụ trách rồi!"
+                });
+            }
 
+            // CHỐT CHẶN 2: Kiểm tra xem Giáo viên này có bị trùng lịch dạy ở lớp khác vào đúng thời gian này không!
+            var lichBiTrung = await _context.PhanCongGiangDays
+                .FirstOrDefaultAsync(p => p.MaGiaoVien == pc.MaGiaoVien
+                                       && p.Thu == pc.Thu
+                                       && p.Buoi == pc.Buoi
+                                       && p.Tiet == pc.Tiet);
 
+            if (lichBiTrung != null)
+            {
+                return BadRequest(new
+                {
+                    message = $"⚠️ Lỗi trùng lịch! Giáo viên này đã được phân công dạy môn '{lichBiTrung.MaMon}' cho lớp '{lichBiTrung.MaLop}' vào Tiết {pc.Tiet} - Buổi {pc.Buoi} - {pc.Thu} rồi!"
+                });
+            }
             _context.PhanCongGiangDays.Add(pc);
             await _context.SaveChangesAsync();
             return Ok(new { message = "Phân công giáo viên bộ môn thành công!" });

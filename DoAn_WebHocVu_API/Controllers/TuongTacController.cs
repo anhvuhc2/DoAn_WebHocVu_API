@@ -83,7 +83,6 @@ namespace DoAn_WebHocVu_API.Controllers
             }
 
             // 3.1 Lưu tin nhắn của phụ huynh vào DB
-            // 3.1 Lưu tin nhắn của phụ huynh vào DB
             phanHoi.ThoiGian = DateTime.Now;
             _context.TuongTacs.Add(phanHoi);
 
@@ -138,6 +137,65 @@ namespace DoAn_WebHocVu_API.Controllers
                 soThongBaoChuaDoc = soLuong,
                 message = soLuong > 0 ? $"Bạn có {soLuong} phản hồi cần xử lý" : "Không có thông báo mới"
             });
+
+        }
+        /// <summary>
+        /// API dành cho Giáo viên trả lời thắc mắc của phụ huynh và tự động trừ chuông
+        /// </summary>
+        [HttpPost("giao-vien-tra-loi")]
+        [Authorize] // Bắt buộc giáo viên phải đăng nhập
+        public async Task<IActionResult> GiaoVienTraLoi([FromBody] GiaoVienTraLoiRequest model)
+        {
+            // 1. Kiểm tra dữ liệu đầu vào
+            if (model == null || string.IsNullOrWhiteSpace(model.NoiDungTraLoi))
+            {
+                return BadRequest(new { message = "Vui lòng nhập nội dung câu trả lời!" });
+            }
+
+            // 2. Tìm tin nhắn gốc đang "Chờ GV xử lý" trong Database
+            // 2. Lấy mã giáo viên đang đăng nhập từ Token (Chìa khóa bảo mật)
+            var maGiaoVien = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+            // 3. Tìm tin nhắn gốc VÀ kết nối sang bảng KeHoachLop để kiểm tra chủ sở hữu
+            var tinNhanGoc = await _context.TuongTacs
+                .Include(t => t.MaKeHoachNavigation)
+                .FirstOrDefaultAsync(t => t.MaTuongTac == model.MaTuongTacGoc);
+
+            if (tinNhanGoc == null)
+            {
+                return NotFound(new { message = "Không tìm thấy câu hỏi gốc cần trả lời!" });
+            }
+
+            // CHỐT CHẶN BẢO MẬT: Kiểm tra xem giáo viên đang thao tác có đúng là GVCN của lớp/kế hoạch này không!
+            if (tinNhanGoc.MaKeHoachNavigation == null || tinNhanGoc.MaKeHoachNavigation.NguoiDang != maGiaoVien)
+            {
+                return StatusCode(403, new { message = "Lỗi bảo mật: Bạn không phải là GVCN phụ trách kế hoạch này nên không có quyền trả lời!" });
+            }
+
+            // 3. CẬP NHẬT TRẠNG THÁI (Chốt chặn giúp trừ chuông ở đây!)
+            // Đổi từ "Chờ GV xử lý" -> "Đã phản hồi" để hàm DemSoTinNhanCho không đếm nó nữa
+            tinNhanGoc.TrangThai = "Đã phản hồi";
+
+            // 4. TẠO TIN NHẮN TRẢ LỜI CỦA GIÁO VIÊN
+            var phanHoiCuaGV = new TuongTac
+            {
+                MaKeHoach = tinNhanGoc.MaKeHoach,
+                TenDangNhap = tinNhanGoc.TenDangNhap, // Giữ nguyên mã của phụ huynh để tin nhắn bay về đúng hộp thư của họ
+                NoiDung = "Giáo viên chủ nhiệm: " + model.NoiDungTraLoi.Trim(),
+                ThoiGian = DateTime.Now,
+                TrangThai = "Giáo viên trả lời"
+            };
+
+            _context.TuongTacs.Add(phanHoiCuaGV);
+
+            // 5. Lưu tất cả thay đổi vào Database
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                message = "Gửi phản hồi thành công! Chuông thông báo đã được trừ đi 1.",
+                data = phanHoiCuaGV
+            });
         }
         /// <summary>
         /// API để Phụ huynh xem danh sách thông báo và điểm số
@@ -167,9 +225,14 @@ namespace DoAn_WebHocVu_API.Controllers
                 await _context.SaveChangesAsync();
             }
             // --------------------------------------------------
-
-            return Ok(danhSachTinNhan);
+            
             return Ok(danhSachTinNhan);
         }
     }
+    public class GiaoVienTraLoiRequest
+    {
+        public int MaTuongTacGoc { get; set; } // ID của tin nhắn đang làm chuông reo
+        public string NoiDungTraLoi { get; set; } // Câu trả lời của giáo viên
+    }
+
 }

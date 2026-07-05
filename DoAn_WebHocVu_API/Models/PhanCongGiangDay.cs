@@ -18,4 +18,8 @@ public partial class PhanCongGiangDay
     public virtual LopHoc? MaLopNavigation { get; set; }
 
     public virtual MonHoc? MaMonNavigation { get; set; }
+
+    public string? Thu { get; set; }
+    public string? Buoi { get; set; }
+    public int? Tiet { get; set; }
 }
