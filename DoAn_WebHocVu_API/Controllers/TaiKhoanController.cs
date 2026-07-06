@@ -66,19 +66,20 @@ namespace DoAn_WebHocVu_API.Controllers
                 HoTen = user.HoTen
             });
         } // <--- DẤU NGOẶC QUAN TRỌNG NHẤT: Đóng hàm Đăng Nhập ở đây!
-        /// <summary>
-        /// API 1: Xem danh sách toàn bộ tài khoản 
-        /// </summary>
         
-        [HttpGet("danh-sach")]
-        [Authorize(Roles = "HieuTruong, GiaoVien")]
-        public async Task<IActionResult> LayDanhSachTaiKhoan()
+        // =========================================================================
+        // API: DANH SÁCH GIÁO VIÊN (ĐÃ TÍCH HỢP THUẬT TOÁN ĐỌC NHIỆM VỤ & LỊCH DẠY)
+        // =========================================================================
+        [HttpGet("danh-sach-giao-vien")]
+        [Authorize(Roles = "HieuTruong,GiaoVien")]
+        public async Task<IActionResult> LayDanhSachGiaoVien()
         {
-            // BƯỚC 1: Lấy dữ liệu an toàn từ Database lên (Vẫn giấu mật khẩu, nhưng lấy thêm TenDangNhap để làm vốn)
+            // BƯỚC 1: Lấy dữ liệu an toàn từ Database (Chỉ lọc lấy Giáo viên, bỏ qua Phụ huynh)
             var danhSachTho = await _context.TaiKhoans
+                .Where(t => t.VaiTro == "GiaoVien")
                 .Select(tk => new
                 {
-                    tk.TenDangNhap, // Lấy tạm ra để lát nữa cắt chữ
+                    tk.TenDangNhap,
                     tk.HoTen,
                     tk.VaiTro,
                     PhanCongGiangDays = tk.PhanCongGiangDays.Select(pc => new
@@ -94,13 +95,10 @@ namespace DoAn_WebHocVu_API.Controllers
             {
                 HoTen = tk.HoTen,
                 VaiTro = tk.VaiTro,
-
-                // THUẬT TOÁN ĐỌC TÊN: 
-                // Nếu Tên đăng nhập bắt đầu bằng chữ "GVCN" -> Cắt bỏ 4 chữ đầu, lấy phần đuôi ghép vào
+                // THUẬT TOÁN ĐỌC TÊN:
                 NhiemVu = tk.TenDangNhap.StartsWith("GVCN")
-                          ? $"Giáo viên chủ nhiệm {tk.TenDangNhap.Substring(4)}"
-                          : (tk.PhanCongGiangDays.Count > 0 ? "Giáo viên bộ môn" : "Chưa phân công"),
-
+                    ? $"Giáo viên chủ nhiệm {tk.TenDangNhap.Substring(4)}"
+                    : (tk.PhanCongGiangDays.Count > 0 ? "Giáo viên bộ môn" : "Chưa phân công"),
                 PhanCongGiangDays = tk.PhanCongGiangDays
             });
 
@@ -110,31 +108,83 @@ namespace DoAn_WebHocVu_API.Controllers
         /// <summary>
         /// API 2: Thêm nhân sự mới (Chỉ Hiệu trưởng)
         /// </summary>
+        // =========================================================================
+        // API 2: THÊM TÀI KHOẢN MỚI (Tự động kiểm tra MaHS & Liên kết tự động cho GVCN)
+        // =========================================================================
         [HttpPost("them-tai-khoan")]
-        [Authorize(Roles = "HieuTruong")] // Gắn mác VIP: Cửa này chỉ Hiệu trưởng được vào
-        public async Task<IActionResult> ThemTaiKhoan([FromBody] TaiKhoan tkMoi)
+        [Authorize(Roles = "HieuTruong,GiaoVien")]
+        // 💡 THÊM THAM SỐ maHS (MÃ HỌC SINH) ĐỂ KIỂM TRA QUYỀN VÀ TỰ ĐỘNG GẮN BẢNG HỌC SINH
+        public async Task<IActionResult> ThemTaiKhoan([FromBody] TaiKhoan tkMoi, [FromQuery] string? maHS = null)
         {
-            // Kiểm tra xem mã nhân sự này đã bị trùng chưa
+            // Kiểm tra xem mã tài khoản này đã bị trùng chưa
             var daTonTai = await _context.TaiKhoans.AnyAsync(t => t.TenDangNhap == tkMoi.TenDangNhap);
             if (daTonTai)
             {
                 return BadRequest(new { message = $"Lỗi: Mã tài khoản '{tkMoi.TenDangNhap}' đã tồn tại!" });
             }
 
+            // =========================================================================
+            // 🛡️ TẦNG 2: KIỂM TRA QUYỀN CỦA GIÁO VIÊN CHỦ NHIỆM DỰA TRÊN MÃ HỌC SINH
+            // =========================================================================
+            if (!User.IsInRole("HieuTruong")) // Nếu là Giáo viên đang đăng nhập
+            {
+                // Luật 1: GVCN tuyệt đối chỉ được phép tạo tài khoản Phụ huynh
+                if (tkMoi.VaiTro != "PhuHuynh")
+                {
+                    return StatusCode(403, new { message = "⛔ Bạn chỉ có quyền tạo tài khoản Phụ huynh, không thể tự ý tạo tài khoản Giáo viên hoặc Ban giám hiệu!" });
+                }
+
+                // Luật 2: GVCN khi tạo tài khoản Phụ huynh BẮT BUỘC phải truyền vào Mã Học Sinh (maHS)
+                if (string.IsNullOrEmpty(maHS))
+                {
+                    return BadRequest(new { message = "⛔ Vui lòng nhập thêm Mã học sinh (maHS) để hệ thống kiểm tra quyền Chủ nhiệm của bạn!" });
+                }
+
+                // Luật 3: Kiểm tra xem Mã học sinh có tồn tại trong hệ thống không
+                var hocSinh = await _context.HocSinhs.FirstOrDefaultAsync(hs => hs.MaHs == maHS);
+                if (hocSinh == null)
+                {
+                    return NotFound(new { message = $"⛔ Không tìm thấy học sinh nào có mã '{maHS}' trong hệ thống!" });
+                }
+
+                // Luật 4: Kiểm tra xem học sinh này có thuộc lớp do cô này chủ nhiệm không
+                var lopHoc = await _context.LopHocs.FirstOrDefaultAsync(l => l.MaLop == hocSinh.MaLop);
+                var userDangNhap = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+                if (lopHoc == null || lopHoc.GvchuNhiem != userDangNhap)
+                {
+                    return StatusCode(403, new { message = $"⛔ Từ chối! Học sinh {hocSinh.HoTen} thuộc lớp {hocSinh.MaLop}, bạn không phải GVCN lớp này nên không được phép tạo tài khoản phụ huynh cho em này!" });
+                }
+            }
+            // =========================================================================
+
+            // BƯỚC 1: LƯU TÀI KHOẢN MỚI VÀO DATABASE
             _context.TaiKhoans.Add(tkMoi);
             await _context.SaveChangesAsync();
 
-            return Ok(new { message = $"Tuyệt vời! Đã cấp tài khoản {tkMoi.VaiTro} cho {tkMoi.HoTen}." });
+            // BƯỚC 2: SIÊU TIỆN ÍCH - TỰ ĐỘNG GẮN MÃ PHỤ HUYNH VÀO BẢNG HỌC SINH LUÔN!
+            if (!string.IsNullOrEmpty(maHS))
+            {
+                var hocSinhCanGan = await _context.HocSinhs.FirstOrDefaultAsync(hs => hs.MaHs == maHS);
+                if (hocSinhCanGan != null)
+                {
+                    hocSinhCanGan.TaiKhoanPhuHuynh = tkMoi.TenDangNhap;
+                    await _context.SaveChangesAsync();
+                }
+            }
+
+            return Ok(new { message = $"Tuyệt vời! Đã cấp tài khoản {tkMoi.VaiTro} cho {tkMoi.HoTen} và tự động liên kết thành công với học sinh mã {maHS}!" });
         }
 
         /// <summary>
         /// API 3: Xóa nhân sự nghỉ việc / chuyển trường (Chỉ Hiệu trưởng)
         /// </summary>
         [HttpDelete("xoa-tai-khoan/{tenDangNhap}")]
-        [Authorize(Roles = "HieuTruong")]
+        [Authorize(Roles = "HieuTruong,GiaoVien")] // Chỉ Hiệu trưởng mới có quyền này
         public async Task<IActionResult> XoaTaiKhoan(string tenDangNhap)
         {
-            var taiKhoan = await _context.TaiKhoans.FirstOrDefaultAsync(t => t.TenDangNhap == tenDangNhap);
+            string maClean = tenDangNhap.Trim();
+            var taiKhoan = await _context.TaiKhoans.FirstOrDefaultAsync(t => t.TenDangNhap == maClean);
             if (taiKhoan == null)
             {
                 return NotFound(new { message = "Không tìm thấy tài khoản này trong hệ thống." });
@@ -146,13 +196,90 @@ namespace DoAn_WebHocVu_API.Controllers
             {
                 return BadRequest(new { message = "Không thể tự xóa tài khoản của chính mình đang đăng nhập!" });
             }
+            // =========================================================================
+            // 🛡️ TẦNG 2: KIỂM TRA QUYỀN CỦA GIÁO VIÊN CHỦ NHIỆM
+            // =========================================================================
+            if (!User.IsInRole("HieuTruong")) // Nếu KHÔNG PHẢI là Hiệu trưởng (tức là Giáo viên)
+            {
+                // Luật 1: GVCN chỉ được xóa tài khoản Phụ huynh, không được xóa đồng nghiệp/Sếp
+                if (taiKhoan.VaiTro != "PhuHuynh")
+                {
+                    return StatusCode(403, new { message = "⛔ Bạn chỉ có quyền xóa tài khoản Phụ huynh, không thể xóa tài khoản đồng nghiệp hoặc Ban giám hiệu!" });
+                }
 
+                // Luật 2: Phụ huynh đó phải có con đang học trong lớp do chính mình chủ nhiệm          
+                var hocSinh = await _context.HocSinhs.FirstOrDefaultAsync(hs => hs.TaiKhoanPhuHuynh == maClean);
+                if (hocSinh != null)
+                {
+                    var lopHoc = await _context.LopHocs.FirstOrDefaultAsync(l => l.MaLop == hocSinh.MaLop);
+
+                    // Tận dụng luôn biến userDangNhap đã khai báo sẵn ở dòng 142 bên trên
+                    if (lopHoc == null || lopHoc.GvchuNhiem != userDangNhap)
+                    {
+                        return StatusCode(403, new { message = $"⛔ Từ chối! Phụ huynh này thuộc lớp {hocSinh.MaLop}, bạn không phải GVCN lớp này nên không thể xóa!" });
+                    }
+                }
+            }
+            // =========================================================================
+            // =========================================================================
+            // 1. DỌN DẸP NẾU LÀ PHỤ HUYNH: Ngắt liên kết với bảng Học Sinh
+            // =========================================================================
+            if (taiKhoan.VaiTro == "PhuHuynh")
+            {
+                var cacHocSinh = await _context.HocSinhs
+                    .Where(hs => hs.TaiKhoanPhuHuynh == taiKhoan.TenDangNhap)
+                    .ToListAsync();
+
+                foreach (var hs in cacHocSinh)
+                {
+                    hs.TaiKhoanPhuHuynh = null; // Cắt đứt liên kết tài khoản, giữ nguyên dữ liệu học sinh
+                }
+            }
+            // =========================================================================
+            // 2. DỌN DẸP NẾU LÀ GIÁO VIÊN: Gỡ chức chủ nhiệm & lịch giảng dạy
+            // =========================================================================
+            if (taiKhoan.VaiTro == "GiaoVien")
+            {
+                // Gỡ chức Giáo viên chủ nhiệm
+                var lopChuNhiems = await _context.LopHocs
+                    .Where(l => l.GvchuNhiem == taiKhoan.TenDangNhap )
+                    .ToListAsync();
+                foreach (var lop in lopChuNhiems)
+                {
+                    lop.GvchuNhiem = null;
+                }
+
+                // Xóa lịch phân công giảng dạy bộ môn
+                var phanCongs = await _context.PhanCongGiangDays
+                    .Where(pc => pc.MaGiaoVien == taiKhoan.TenDangNhap)
+                    .ToListAsync();
+                if (phanCongs.Any())
+                {
+                    _context.PhanCongGiangDays.RemoveRange(phanCongs);
+                }
+            }       
+            // =========================================================================
+            // 3. DỌN DẸP CHUNG: Xóa các tương tác cũ theo đúng cột TenDangNhap trong DB
+            // =========================================================================
+            var tuongTacs = await _context.TuongTacs
+                .Where(t => t.TenDangNhap == taiKhoan.TenDangNhap)
+                .ToListAsync();
+            if (tuongTacs.Any())
+            {
+                _context.TuongTacs.RemoveRange(tuongTacs);
+            }
+            if (tuongTacs.Any())
+            {
+                _context.TuongTacs.RemoveRange(tuongTacs);
+            }
+
+            // =========================================================================
+            // 4. BƯỚC CUỐI: Nhổ cọc - Xóa tài khoản gốc khỏi hệ thống
+            // =========================================================================
             _context.TaiKhoans.Remove(taiKhoan);
             await _context.SaveChangesAsync();
-
-            return Ok(new { message = $"Đã xóa thành công tài khoản {tenDangNhap} khỏi hệ thống." });
+            return Ok(new { message = $"Đã xóa thành công tài khoản '{tenDangNhap}' ra khỏi hệ thống!" });
         }
-
         [HttpGet("kiem-tra-phan-cong")]
         [Authorize(Roles = "HieuTruong,GiaoVien")]
         public IActionResult KiemTraQuyen(string maGiaoVien, string maLop, string maMon)
@@ -167,7 +294,6 @@ namespace DoAn_WebHocVu_API.Controllers
             {
                 return Ok(new { quyen = true, message = "Hợp lệ: Giáo viên bộ môn được phân công dạy môn này." });
             }
-
             // =========================================================================
             // TẦNG 2: KIỂM TRA GIÁO VIÊN CHỦ NHIỆM (Đặc quyền dạy các môn đại trà)
             // =========================================================================
@@ -186,7 +312,6 @@ namespace DoAn_WebHocVu_API.Controllers
                     return BadRequest(new { quyen = false, message = "Thao tác bị chặn: Môn này đã có Giáo viên bộ môn chuyên trách đảm nhận!" });
                 }
             }
-
             // =========================================================================
             // TẦNG 3: CHẶN ĐỨNG (Không phải GV bộ môn mà cũng chẳng phải GVCN của lớp)
             // =========================================================================
@@ -283,11 +408,62 @@ namespace DoAn_WebHocVu_API.Controllers
                 matKhauMoi = "123456",
                 luuY = "GVCN vui lòng nhắc phụ huynh đổi mật khẩu ngay sau khi đăng nhập."
             });
-        }
-  
+        }    
+               
+        // =========================================================================
+        // 2. API: DANH SÁCH PHỤ HUYNH THEO LỚP (Bảo mật 2 tầng: Role + Đúng GVCN)
+        // =========================================================================
+        [HttpGet("danh-sach-phu-huynh/theo-lop/{maLop}")]
+        [Authorize(Roles = "HieuTruong,GiaoVien")]
+        public async Task<IActionResult> GetDanhSachPhuHuynhTheoLop(string maLop)
+        {
+            // =====================================================================
+            // 🛡️ TẦNG 2: KIỂM TRA QUYỀN CHỦ NHIỆM (Chỉ áp dụng với Giáo viên)
+            // =====================================================================
+            // Nếu người đang đăng nhập KHÔNG PHẢI là Hiệu trưởng -> Bắt buộc phải kiểm tra lớp
+            if (!User.IsInRole("HieuTruong"))
+            {
+                // Lấy tên tài khoản đang đăng nhập từ Token JWT
+                var userDangNhap = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
 
-    // Lớp phụ dùng để hứng dữ liệu Tài khoản/Mật khẩu do React gửi lên
-    public class LoginRequest
+                // Tìm thông tin lớp học trong DB
+                var lopHoc = await _context.LopHocs.FirstOrDefaultAsync(l => l.MaLop == maLop);
+
+                // Nếu lớp không tồn tại hoặc tài khoản này KHÔNG phải là GVCN của lớp đó -> Chặn ngay!
+                if (lopHoc == null || lopHoc.GvchuNhiem != userDangNhap)
+                {
+                    return StatusCode(403, new
+                    {
+                        message = $"⛔ Từ chối truy cập! Tài khoản '{userDangNhap}' không phải là Giáo viên chủ nhiệm của lớp {maLop}."
+                    });
+                }
+            }
+            // =====================================================================
+            // Bước 1: Quét bảng Học sinh xem lớp này có những tài khoản phụ huynh nào
+            var taiKhoanPHs = await _context.HocSinhs
+                .Where(hs => hs.MaLop == maLop && !string.IsNullOrEmpty(hs.TaiKhoanPhuHuynh))
+                .Select(hs => hs.TaiKhoanPhuHuynh)
+                .Distinct()
+                .ToListAsync();
+
+            if (!taiKhoanPHs.Any())
+            {
+                return Ok(new
+                {
+                    message = $"Lớp '{maLop}' hiện chưa có tài khoản phụ huynh nào được đăng ký.",
+                    data = new List<object>()
+                });
+            }
+
+            // Bước 2: Lấy thông tin chi tiết tài khoản phụ huynh từ bảng TaiKhoans
+            var phuHuynhs = await _context.TaiKhoans
+                .Where(t => taiKhoanPHs.Contains(t.TenDangNhap))
+                .ToListAsync();
+
+            return Ok(phuHuynhs);
+        }
+        // Lớp phụ dùng để hứng dữ liệu Tài khoản/Mật khẩu do React gửi lên
+        public class LoginRequest
     {
         public string TenDangNhap { get; set; } = null!;
         public string MatKhau { get; set; } = null!;
