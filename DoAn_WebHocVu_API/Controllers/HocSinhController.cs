@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
@@ -46,10 +46,11 @@ namespace DoAn_WebHocVu_API.Controllers
             if (lopHoc == null)
                 return NotFound("Không tìm thấy mã lớp học này.");
 
-            // 3. Kiểm tra xem giáo viên này có phải GVCN của lớp không
-            if (lopHoc.GvchuNhiem != maGiaoVien)
+            // 3. Kiểm tra xem giáo viên này có phải GVCN của lớp hoặc Hiệu trưởng không
+            bool isHieuTruong = User.IsInRole("HieuTruong");
+            if (lopHoc.GvchuNhiem != maGiaoVien && !isHieuTruong)
             {
-                return StatusCode(403, new { message = $"Bạn không có quyền! Chỉ GVCN của lớp {hs.MaLop} mới được phép thêm học sinh." });
+                return StatusCode(403, new { message = $"Bạn không có quyền! Chỉ Hiệu trưởng hoặc GVCN của lớp {hs.MaLop} mới được phép thêm học sinh." });
             }
 
             // 4. Nếu đúng là GVCN -> Tiến hành thêm mới
@@ -82,9 +83,10 @@ namespace DoAn_WebHocVu_API.Controllers
 
             // Check quyền chủ nhiệm lớp hiện tại của học sinh
             var lopHoc = await _context.LopHocs.FirstOrDefaultAsync(l => l.MaLop == hocSinhGoc.MaLop);
-            if (lopHoc == null || lopHoc.GvchuNhiem != maGiaoVien)
+            bool isHieuTruong = User.IsInRole("HieuTruong");
+            if (lopHoc == null || (lopHoc.GvchuNhiem != maGiaoVien && !isHieuTruong))
             {
-                return StatusCode(403, new { message = $"Bạn không có quyền! Chỉ GVCN của lớp {hocSinhGoc.MaLop} mới được phép sửa." });
+                return StatusCode(403, new { message = $"Bạn không có quyền! Chỉ Hiệu trưởng hoặc GVCN của lớp {hocSinhGoc.MaLop} mới được phép sửa." });
             }
 
             // Tiến hành cập nhật thông tin
@@ -101,7 +103,6 @@ namespace DoAn_WebHocVu_API.Controllers
         /// API 4: Xóa học sinh (Thực chất là chuyển trạng thái - Soft Delete)
         /// </summary>
         [HttpDelete("{maHS}")]
-        [Authorize(Roles = "GiaoVien")]
         public async Task<IActionResult> DeleteHocSinh(string maHS)
         {
             // 1. Lấy mã giáo viên chắc chắn 100%
@@ -119,11 +120,12 @@ namespace DoAn_WebHocVu_API.Controllers
                 return NotFound("Không tìm thấy học sinh cần xóa.");
             }
 
-            // 3. Kiểm tra quyền chủ nhiệm lớp (Đã bọc thép bằng Trim và ToUpper)
+            // 3. Kiểm tra quyền chủ nhiệm lớp và quyền Hiệu trưởng
             var lopHoc = await _context.LopHocs.FirstOrDefaultAsync(l => l.MaLop == hocSinh.MaLop);
-            if (lopHoc == null || lopHoc.GvchuNhiem?.Trim().ToUpper() != maGiaoVien.Trim().ToUpper())
+            bool isHieuTruong = User.IsInRole("HieuTruong");
+            if (lopHoc == null || (lopHoc.GvchuNhiem?.Trim().ToUpper() != maGiaoVien.Trim().ToUpper() && !isHieuTruong))
             {
-                return StatusCode(403, new { message = $"Bạn không có quyền! Lớp {hocSinh.MaLop} do giáo viên '{lopHoc?.GvchuNhiem}' chủ nhiệm, nhưng bạn đăng nhập bằng '{maGiaoVien}'." });
+                return StatusCode(403, new { message = $"Bạn không có quyền! Thao tác này chỉ dành cho Hiệu trưởng hoặc GVCN (hiện tại là '{lopHoc?.GvchuNhiem}')." });
             }
 
             // 4. THẦN THÁNH HÓA: Chuyển trạng thái để bảo toàn điểm số

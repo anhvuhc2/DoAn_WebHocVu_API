@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using DoAn_WebHocVu_API.Models; // Kết nối tới thư mục Models của bạn
 
 using Microsoft.AspNetCore.Mvc;
@@ -67,6 +67,16 @@ namespace DoAn_WebHocVu_API.Controllers
             });
         } // <--- DẤU NGOẶC QUAN TRỌNG NHẤT: Đóng hàm Đăng Nhập ở đây!
         
+        // =========================================================================
+        // API CHO DEVELOPER: LẤY TOÀN BỘ TÀI KHOẢN ĐỂ GẮN VÀO TOOL MOCK LOGIN
+        // =========================================================================
+        [HttpGet("all-for-testing")]
+        public async Task<IActionResult> GetAllForTesting()
+        {
+            var ds = await _context.TaiKhoans.Select(t => new { t.TenDangNhap, t.HoTen, t.VaiTro }).ToListAsync();
+            return Ok(ds);
+        }
+
         // =========================================================================
         // API: DANH SÁCH GIÁO VIÊN (ĐÃ TÍCH HỢP THUẬT TOÁN ĐỌC NHIỆM VỤ & LỊCH DẠY)
         // =========================================================================
@@ -222,45 +232,38 @@ namespace DoAn_WebHocVu_API.Controllers
             }
             // =========================================================================
             // =========================================================================
-            // 1. DỌN DẸP NẾU LÀ PHỤ HUYNH: Ngắt liên kết với bảng Học Sinh
+            // 1. DỌN DẸP LIÊN KẾT: Ngắt liên kết với bảng Học Sinh (Cho bất kỳ role nào)
             // =========================================================================
-            if (taiKhoan.VaiTro == "PhuHuynh")
-            {
-                var cacHocSinh = await _context.HocSinhs
-                    .Where(hs => hs.TaiKhoanPhuHuynh == taiKhoan.TenDangNhap)
-                    .ToListAsync();
+            var cacHocSinh = await _context.HocSinhs
+                .Where(hs => hs.TaiKhoanPhuHuynh == taiKhoan.TenDangNhap)
+                .ToListAsync();
 
-                foreach (var hs in cacHocSinh)
-                {
-                    hs.TaiKhoanPhuHuynh = null; // Cắt đứt liên kết tài khoản, giữ nguyên dữ liệu học sinh
-                }
+            foreach (var hs in cacHocSinh)
+            {
+                hs.TaiKhoanPhuHuynh = null; // Cắt đứt liên kết tài khoản, giữ nguyên dữ liệu học sinh
             }
             // =========================================================================
-            // 2. DỌN DẸP NẾU LÀ GIÁO VIÊN: Gỡ chức chủ nhiệm & lịch giảng dạy
+            // 2. DỌN DẸP LIÊN KẾT NHÂN SỰ: Gỡ chức chủ nhiệm & lịch giảng dạy (Không phân biệt rác dữ liệu)
             // =========================================================================
-            if (taiKhoan.VaiTro == "GiaoVien")
+            var lopChuNhiems = await _context.LopHocs
+                .Where(l => l.GvchuNhiem == taiKhoan.TenDangNhap )
+                .ToListAsync();
+            foreach (var lop in lopChuNhiems)
             {
-                // Gỡ chức Giáo viên chủ nhiệm
-                var lopChuNhiems = await _context.LopHocs
-                    .Where(l => l.GvchuNhiem == taiKhoan.TenDangNhap )
-                    .ToListAsync();
-                foreach (var lop in lopChuNhiems)
-                {
-                    lop.GvchuNhiem = null;
-                }
+                lop.GvchuNhiem = null;
+            }
 
-                // Xóa lịch phân công giảng dạy bộ môn
-                var phanCongs = await _context.PhanCongGiangDays
-                    .Where(pc => pc.MaGiaoVien == taiKhoan.TenDangNhap)
-                    .ToListAsync();
-                if (phanCongs.Any())
-                {
-                    _context.PhanCongGiangDays.RemoveRange(phanCongs);
-                }
-            }       
+            var phanCongs = await _context.PhanCongGiangDays
+                .Where(pc => pc.MaGiaoVien == taiKhoan.TenDangNhap)
+                .ToListAsync();
+            if (phanCongs.Any())
+            {
+                _context.PhanCongGiangDays.RemoveRange(phanCongs);
+            }
             // =========================================================================
-            // 3. DỌN DẸP CHUNG: Xóa các tương tác cũ theo đúng cột TenDangNhap trong DB
+            // 3. DỌN DẸP CHUNG: Ngắt khóa ngoại và xóa các tương tác
             // =========================================================================
+            // 3.1 Dọn Tương Tác
             var tuongTacs = await _context.TuongTacs
                 .Where(t => t.TenDangNhap == taiKhoan.TenDangNhap)
                 .ToListAsync();
@@ -268,9 +271,19 @@ namespace DoAn_WebHocVu_API.Controllers
             {
                 _context.TuongTacs.RemoveRange(tuongTacs);
             }
-            if (tuongTacs.Any())
+            
+            // 3.2 Ngắt liên kết Lịch sử Đăng Kế hoạch
+            var cacKeHoach = await _context.KeHoachLops.Where(k => k.NguoiDang == taiKhoan.TenDangNhap).ToListAsync();
+            foreach (var k in cacKeHoach)
             {
-                _context.TuongTacs.RemoveRange(tuongTacs);
+                k.NguoiDang = null;
+            }
+
+            // 3.3 Ngắt liên kết Lịch sử Điểm danh
+            var cacDiemDanh = await _context.DiemDanhs.Where(d => d.NguoiDiemDanh == taiKhoan.TenDangNhap).ToListAsync();
+            foreach (var d in cacDiemDanh)
+            {
+                d.NguoiDiemDanh = null;
             }
 
             // =========================================================================
@@ -280,15 +293,23 @@ namespace DoAn_WebHocVu_API.Controllers
             await _context.SaveChangesAsync();
             return Ok(new { message = $"Đã xóa thành công tài khoản '{tenDangNhap}' ra khỏi hệ thống!" });
         }
+
+
         [HttpGet("kiem-tra-phan-cong")]
         [Authorize(Roles = "HieuTruong,GiaoVien")]
         public IActionResult KiemTraQuyen(string maGiaoVien, string maLop, string maMon)
         {
+            string mgvTrim = maGiaoVien?.Trim().ToUpper() ?? "";
+            string mlTrim = maLop?.Trim().ToUpper() ?? "";
+            string mmTrim = maMon?.Trim().ToUpper() ?? "";
+
             // =========================================================================
             // TẦNG 1: KIỂM TRA GIÁO VIÊN BỘ MÔN (Ưu tiên kiểm tra phân công đích danh)
             // =========================================================================
             var laGiaoVienBoMon = _context.PhanCongGiangDays.Any(p =>
-                p.MaGiaoVien == maGiaoVien && p.MaLop == maLop && p.MaMon == maMon);
+                p.MaGiaoVien.Trim().ToUpper() == mgvTrim && 
+                p.MaLop.Trim().ToUpper() == mlTrim && 
+                p.MaMon.Trim().ToUpper() == mmTrim);
 
             if (laGiaoVienBoMon)
             {
@@ -302,10 +323,12 @@ namespace DoAn_WebHocVu_API.Controllers
 
             if (lopHoc != null && lopHoc.GvchuNhiem == maGiaoVien)
             {
-                // GVCN có quyền dạy mọi môn đại trà, NGOẠI TRỪ các môn chuyên trách biệt lập
-                if (maMon != "ANH" && maMon != "TIN")
+                // Thay vì hardcode môn, tra cứu bảng Phân công xem môn này đã có ai dạy ở lớp này chưa
+                var daCoGVBMAssign = _context.PhanCongGiangDays.Any(p => p.MaLop.Trim().ToUpper() == mlTrim && p.MaMon.Trim().ToUpper() == mmTrim);
+                
+                if (!daCoGVBMAssign)
                 {
-                    return Ok(new { quyen = true, message = "Hợp lệ: Giáo viên chủ nhiệm có quyền nhập điểm môn đại trà." });
+                    return Ok(new { quyen = true, message = "Hợp lệ: Giáo viên chủ nhiệm bao sô giảng dạy các môn chưa phân công." });
                 }
                 else
                 {
@@ -343,6 +366,51 @@ namespace DoAn_WebHocVu_API.Controllers
             var lichDay = await _context.PhanCongGiangDays
                                         .Where(p => p.MaGiaoVien == maGiaoVien)
                                         .ToListAsync();
+
+            // BƯỚC 3: XỬ LÝ LỊCH ẢO - CẤP CHO GVCN NHỮNG MÔN 'BAO SÔ'
+            var cacLopChuNhiem = await _context.LopHocs
+                .Where(l => l.GvchuNhiem.Trim().ToUpper() == maGiaoVien.Trim().ToUpper())
+                .ToListAsync();
+
+            if (cacLopChuNhiem.Any())
+            {
+                var tatCaMon = await _context.MonHocs.ToListAsync();
+                foreach (var lop in cacLopChuNhiem)
+                {
+                    // Lấy các môn đã CÓ người dạy ở lớp này
+                    var cacMonDaPhanCong = await _context.PhanCongGiangDays
+                        .Where(p => p.MaLop == lop.MaLop)
+                        .Select(p => p.MaMon.Trim().ToUpper())
+                        .ToListAsync();
+
+                    // Xác định danh sách môn tự động được áp cho lớp này theo khối
+                    bool laKhoi12 = lop.MaLop.Contains("1") || lop.MaLop.Contains("2");
+                    bool laKhoi3 = lop.MaLop.Contains("3");
+                    
+                    var maMonChuan = new List<string> { "TOAN", "TV", "DD", "GDTC", "AN", "MT", "HĐTN" };
+                    if (laKhoi12) { maMonChuan.Add("TNXH"); maMonChuan.Add("ANH"); }
+                    else if (laKhoi3) { maMonChuan.Add("TNXH"); maMonChuan.Add("ANH"); maMonChuan.Add("TIN"); maMonChuan.Add("CN"); }
+                    else { maMonChuan.Add("KH"); maMonChuan.Add("LSĐL"); maMonChuan.Add("ANH"); maMonChuan.Add("TIN"); maMonChuan.Add("CN"); }
+
+                    foreach (var mm in maMonChuan)
+                    {
+                        if (!cacMonDaPhanCong.Contains(mm))
+                        {
+                            var monObj = tatCaMon.FirstOrDefault(m => m.MaMon.Trim().ToUpper() == mm);
+                            lichDay.Add(new PhanCongGiangDay
+                            {
+                                MaPhanCong = -1,
+                                MaGiaoVien = maGiaoVien,
+                                MaLop = lop.MaLop,
+                                MaMon = monObj != null ? monObj.MaMon : mm,
+                                Thu = "Cả tuần",
+                                Buoi = "Linh hoạt",
+                                Tiet = null
+                            });
+                        }
+                    }
+                }
+            }
 
             if (lichDay.Count == 0)
             {

@@ -100,6 +100,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI(); // Thêm dòng này
     //app.MapOpenApi();
 }
+app.UseStaticFiles(); // Cho phép truy xuất file đính kèm từ thư mục wwwroot tĩnh
 app.UseCors("ChoPhepReact");
 app.UseAuthentication();
 app.UseAuthorization();

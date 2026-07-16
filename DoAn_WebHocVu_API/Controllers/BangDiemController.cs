@@ -1,4 +1,4 @@
-﻿using DoAn_WebHocVu_API.Models;
+using DoAn_WebHocVu_API.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -44,25 +44,37 @@ namespace DoAn_WebHocVu_API.Controllers
             // 3. THUẬT TOÁN GÁC CỔNG VỒNG TRONG (Kiểm tra chéo quyền của GV)
             bool duocPhepThaoTac = false;
 
-            if (monHoc.LoaiMon == "Cơ bản")
-            {
-                // LUẬT 1: Môn cơ bản -> Đi tìm lớp của học sinh này xem ai làm chủ nhiệm
-                var lopHoc = await _context.LopHocs.FirstOrDefaultAsync(l => l.MaLop == hocSinh.MaLop);
-                if (lopHoc != null && lopHoc.GvchuNhiem == maGiaoVien)
-                {
-                    duocPhepThaoTac = true; // Khớp GVCN -> Mở cổng
-                }
-            }
-            else if (monHoc.LoaiMon == "Chuyên")
-            {
-                // LUẬT 2: Môn chuyên -> Lục bảng Phân Công Giảng Dạy xem có tên không
-                var duocPhanCong = await _context.PhanCongGiangDays
-                    .AnyAsync(pc => pc.MaGiaoVien == maGiaoVien && pc.MaLop == hocSinh.MaLop && pc.MaMon == model.MaMon);
+            string mndTrim = maGiaoVien?.Trim().ToUpper() ?? "";
+            string mmTrim = model.MaMon?.Trim().ToUpper() ?? "";
 
-                if (duocPhanCong)
+            // LUẬT BẤT BẠI: Quét đồng thời 2 tư cách (Không quan tâm chữ Cơ bản hay Chuyên nữa)
+
+            // 1) Tư cách GVCN:
+            var lopHoc = await _context.LopHocs.FirstOrDefaultAsync(l => l.MaLop == hocSinh.MaLop);
+            bool laGVCN = (lopHoc != null && lopHoc.GvchuNhiem?.Trim().ToUpper() == mndTrim);
+
+            // 2) Tư cách GVBM (Có trên bảng Phân công):
+            bool laGVBM = await _context.PhanCongGiangDays
+                .AnyAsync(pc => pc.MaGiaoVien.Trim().ToUpper() == mndTrim && pc.MaLop == hocSinh.MaLop && pc.MaMon.Trim().ToUpper() == mmTrim);
+
+            if (laGVBM)
+            {
+                // Chân lý tuyệt đối: Có phân công là được nhập điểm môn đó, bất kể loại môn gì!
+                duocPhepThaoTac = true; 
+            }
+            else if (laGVCN)
+            {
+                // Nếu chưa được phân công nhưng là GVCN -> Cho phép nhập điểm các môn đại trà,
+                // NGOẠI TRỪ môn đó đã được nhà trường giăng sẵn một Giáo viên chuyên trách nẫng tay trên!
+                bool daCoGvChuyenTrach = await _context.PhanCongGiangDays
+                    .AnyAsync(pc => pc.MaLop == hocSinh.MaLop && pc.MaMon.Trim().ToUpper() == mmTrim);
+                
+                if (daCoGvChuyenTrach)
                 {
-                    duocPhepThaoTac = true; // Khớp phân công bộ môn -> Mở cổng
+                    return StatusCode(403, new { message = $"Từ chối truy cập: Bạn là Chủ nhiệm, nhưng môn {monHoc.TenMon} của lớp này đã được giao phó riêng cho Giáo viên bộ môn. Bạn không được nhập đè!" });
                 }
+
+                duocPhepThaoTac = true;
             }
 
             // 4. Phán quyết cuối cùng về quyền hạn
@@ -72,7 +84,14 @@ namespace DoAn_WebHocVu_API.Controllers
             }
 
             // 5. NGHIỆP VỤ PHÂN LOẠI MÔN THEO THÔNG TƯ 27
-            var cacMonNhanXet = new List<string> { "TNXH", "GDTC", "HDTN", "HĐTN", "DD" };
+            var cacMonNhanXet = new List<string> { "TNXH", "GDTC", "HDTN", "HĐTN", "DD", "AN", "MT" };
+            
+            // Cảm biến siêu việt: Tiếng Anh Khối 1, 2 là môn làm quen (nhận xét chữ), Khối 3 trở lên mới tính điểm
+            bool hocKhoi12 = hocSinh.MaLop.Contains("1") || hocSinh.MaLop.Contains("2");
+            if (hocKhoi12)
+            {
+                cacMonNhanXet.Add("ANH");
+            }
 
             if (cacMonNhanXet.Contains(model.MaMon.ToUpper()))
             {
@@ -133,12 +152,14 @@ namespace DoAn_WebHocVu_API.Controllers
                     MaMon = b.MaMon,
                     TenMon = _context.MonHocs.FirstOrDefault(m => m.MaMon == b.MaMon).TenMon,
                     DiemThi = b.DiemThi,
+                    XepLoai = b.XepLoai,
+                    NhanXet = b.NhanXet,
                     NgayCapNhat = b.NgayCapNhat
                 })
                 .ToListAsync();
 
             if (!bangDiem.Any())
-                return NotFound(new { message = $"Học sinh {maHS} hiện chưa có điểm nào trong hệ thống." });
+                return Ok(new List<object>()); // Return empty list rather than 404 to avoid frontend console error spikes
 
             return Ok(bangDiem);
         }
@@ -147,7 +168,7 @@ namespace DoAn_WebHocVu_API.Controllers
         /// API: Xuất Bảng Điểm Tổng (Chỉ GVCN mới được xuất)
         /// </summary>
         [HttpGet("xuat-bang-diem-tong/{maLop}")]
-        [Authorize(Roles = "GiaoVien")]
+        [Authorize(Roles = "GiaoVien,HieuTruong")]
         public async Task<IActionResult> XuatBangDiemTong(string maLop)
         {
             // BƯỚC 1: LẤY THÔNG TIN VÀ KIỂM TRA QUYỀN
@@ -156,50 +177,32 @@ namespace DoAn_WebHocVu_API.Controllers
 
             if (lopHoc == null) return NotFound(new { message = "Không tìm thấy lớp học này!" });
 
-            // Rào chắn tuyệt đối: Chỉ cho phép đúng GVCN của lớp này
-            if (lopHoc.GvchuNhiem?.Trim().ToUpper() != maNguoiDung?.Trim().ToUpper())
+            // Rào chắn: Hiệu trưởng được xem tất cả, Giáo viên phải là chủ nhiệm
+            if (!User.IsInRole("HieuTruong"))
             {
-                return StatusCode(403, new { message = $"TỪ CHỐI: Chỉ Giáo viên chủ nhiệm mới được quyền xuất điểm của lớp {lopHoc.TenLop}." });
+                if (lopHoc.GvchuNhiem?.Trim().ToUpper() != maNguoiDung?.Trim().ToUpper())
+                {
+                    return StatusCode(403, new { message = $"TỪ CHỐI: Chỉ Giáo viên chủ nhiệm mới được quyền xuất điểm của lớp {lopHoc.TenLop}." });
+                }
             }
             // BƯỚC 2: CHUẨN BỊ DỮ LIỆU
             var danhSachHocSinh = await _context.HocSinhs.Where(h => h.MaLop == maLop).ToListAsync();
             var maHocSinhs = danhSachHocSinh.Select(h => h.MaHs).ToList();
             var danhSachDiem = await _context.BangDiems.Where(b => maHocSinhs.Contains(b.MaHs)).ToListAsync();
 
-            // --- THUẬT TOÁN GỘP MÔN HỌC THÔNG MINH ---
-            // 1. Lấy toàn bộ môn học trong trường
+            // --- THUẬT TOÁN GỘP MÔN HỌC THÀNH VIÊN THEO KHỐI LỚP ---
             var tatCaMon = await _context.MonHocs.ToListAsync();
+            var validSubjectCodes = GetClassSubjectCodes(maLop);
+            var danhSachMonHoc = tatCaMon
+                .Where(m => validSubjectCodes.Contains(m.MaMon.Trim().ToUpper()))
+                .ToList();
 
-            // 2. Xác định xem lớp này là khối 1, 2, 3 hay khối 4, 5 dựa vào ký tự trong mã lớp
-            bool laKhoi123 = maLop.Contains("1") || maLop.Contains("2") || maLop.Contains("3");
-
-            // 3. Vào sổ phân công lấy danh sách các MÔN CHUYÊN (Tiếng Anh, Thể dục...)
-            var maMonChuyen = await _context.PhanCongGiangDays
-                                            .Where(pc => pc.MaLop == maLop)
-                                            .Select(pc => pc.MaMon)
-                                            .ToListAsync();
-
-            // 4. BỘ LỌC TỰ ĐỘNG CHỌN MÔN (Kết hợp Đại trà + Chuyên)
-            var danhSachMonHoc = tatCaMon.Where(m =>
+            // DANH SÁCH MIỄN TRỪ ĐIỂM SỐ (Chỉ kiểm tra Xếp loại) - Đồng bộ theo Mã Môn
+            var cacMonNgoaiLeCodes = new List<string> { "DD", "GDTC", "AN", "MT", "HDTN", "HĐTN", "TNXH" };
+            if (maLop.Contains("1") || maLop.Contains("2"))
             {
-                var ten = m.TenMon?.Trim().ToLower() ?? "";
-
-                // Tiêu chí 1: Nếu là môn chuyên đã được phân công -> Lấy!
-                if (maMonChuyen.Contains(m.MaMon)) return true;
-
-                // Tiêu chí 2: Các môn đại trà chung bắt buộc phải có ở mọi khối
-                if (ten.Contains("toán") || ten.Contains("tiếng việt") || ten.Contains("đạo đức") || ten.Contains("trải nghiệm")) return true;
-
-                // Tiêu chí 3: Phân loại đại trà theo khối
-                if (laKhoi123 && ten.Contains("tự nhiên và xã hội")) return true;
-                if (!laKhoi123 && (ten.Contains("khoa học") || ten.Contains("lịch sử") || ten.Contains("địa lí"))) return true;
-
-                return false; // Nếu không thuộc các nhóm trên thì bỏ qua
-            }).ToList();
-            // ------------------------------------------
-
-            // DANH SÁCH MIỄN TRỪ ĐIỂM SỐ (Chỉ kiểm tra Xếp loại)
-            var danhSachNgoaiLe = new List<string> { "âm nhạc", "thể dục", "mĩ thuật", "hoạt động trải nghiệm", "đạo đức", "tự nhiên và xã hội" };
+                cacMonNgoaiLeCodes.Add("ANH");
+            }
             var danhSachLoi = new List<string>();
 
             // BƯỚC 3: THUẬT TOÁN QUÉT LỖ HỔNG DỮ LIỆU
@@ -211,9 +214,9 @@ namespace DoAn_WebHocVu_API.Controllers
                 foreach (var mon in danhSachMonHoc)
                 {
                     var diemMon = danhSachDiem.FirstOrDefault(d => d.MaHs == hs.MaHs && d.MaMon == mon.MaMon);
-                    var tenMonClean = mon.TenMon?.Trim().ToLower() ?? "";
+                    bool laMonNhanXet = cacMonNgoaiLeCodes.Contains(mon.MaMon.Trim().ToUpper());
 
-                    if (danhSachNgoaiLe.Contains(tenMonClean))
+                    if (laMonNhanXet)
                     {
                         // LUẬT 1: Môn đánh giá -> Kiểm tra cột XepLoai
                         if (diemMon == null || string.IsNullOrWhiteSpace(diemMon.XepLoai))
@@ -244,7 +247,7 @@ namespace DoAn_WebHocVu_API.Controllers
             }
 
             // Nếu dữ liệu sạch 100%, tiến hành gom dữ liệu xuất ra
-            var ketQuaXuat = danhSachHocSinh.Select(hs =>
+            var ketQuaXuat = danhSachHocSinh.Where(hs => hs.TrangThai != "Đã chuyển trường").Select(hs =>
             {
 
                 // 1. Gom đầy đủ điểm và xếp loại
@@ -257,7 +260,7 @@ namespace DoAn_WebHocVu_API.Controllers
                         DiemThi = d?.DiemThi,
                         XepLoai = d?.XepLoai,
                         NhanXet = d?.NhanXet,
-                        LaMonNhanXet = danhSachNgoaiLe.Contains(mon.TenMon?.Trim().ToLower() ?? "")
+                        LaMonNhanXet = cacMonNgoaiLeCodes.Contains(mon.MaMon.Trim().ToUpper())
                     };
                 }).ToList();
 
@@ -340,20 +343,16 @@ namespace DoAn_WebHocVu_API.Controllers
             var danhSachDiem = await _context.BangDiems.Where(b => maHocSinhs.Contains(b.MaHs)).ToListAsync();
             var tatCaMon = await _context.MonHocs.ToListAsync();
 
-            bool laKhoi123 = maLop.Contains("1") || maLop.Contains("2") || maLop.Contains("3");
-            var maMonChuyen = await _context.PhanCongGiangDays.Where(pc => pc.MaLop == maLop).Select(pc => pc.MaMon).ToListAsync();
+            var validSubjectCodes = GetClassSubjectCodes(maLop);
+            var danhSachMonHoc = tatCaMon
+                .Where(m => validSubjectCodes.Contains(m.MaMon.Trim().ToUpper()))
+                .ToList();
 
-            var danhSachMonHoc = tatCaMon.Where(m =>
+            var cacMonNgoaiLeCodes = new List<string> { "DD", "GDTC", "AN", "MT", "HDTN", "HĐTN", "TNXH" };
+            if (maLop.Contains("1") || maLop.Contains("2"))
             {
-                var ten = m.TenMon?.Trim().ToLower() ?? "";
-                if (maMonChuyen.Contains(m.MaMon)) return true;
-                if (ten.Contains("toán") || ten.Contains("tiếng việt") || ten.Contains("đạo đức") || ten.Contains("trải nghiệm")) return true;
-                if (laKhoi123 && ten.Contains("tự nhiên và xã hội")) return true;
-                if (!laKhoi123 && (ten.Contains("khoa học") || ten.Contains("lịch sử") || ten.Contains("địa lí"))) return true;
-                return false;
-            }).ToList();
-
-            var danhSachNgoaiLe = new List<string> { "âm nhạc", "thể dục", "mĩ thuật", "hoạt động trải nghiệm", "đạo đức", "tự nhiên và xã hội" };
+                cacMonNgoaiLeCodes.Add("ANH");
+            }
 
             // --- BƯỚC 2: QUÉT LỖ HỔNG (CHỐT CHẶN BẮT BUỘC) ---
             var danhSachLoi = new List<string>();
@@ -364,7 +363,7 @@ namespace DoAn_WebHocVu_API.Controllers
                 foreach (var mon in danhSachMonHoc)
                 {
                     var diemCuaHs = danhSachDiem.FirstOrDefault(d => d.MaHs == hs.MaHs && d.MaMon == mon.MaMon);
-                    bool laMonNhanXet = danhSachNgoaiLe.Contains(mon.TenMon?.Trim().ToLower() ?? "");
+                    bool laMonNhanXet = cacMonNgoaiLeCodes.Contains(mon.MaMon.Trim().ToUpper());
 
                     if (diemCuaHs == null ||
                        (laMonNhanXet && string.IsNullOrEmpty(diemCuaHs.XepLoai)) ||
@@ -452,6 +451,39 @@ namespace DoAn_WebHocVu_API.Controllers
 
             return Ok(new { message = $"Đã gửi thông báo điểm thành công cho lớp {lopHoc.TenLop}. Ban giám hiệu có thể theo dõi tại mục Kế hoạch lớp!" });
         }
+        private List<string> GetClassSubjectCodes(string maLop)
+        {
+            if (string.IsNullOrEmpty(maLop)) return new List<string>();
+
+            bool laKhoi12 = maLop.Contains("1") || maLop.Contains("2");
+            bool laKhoi3 = maLop.Contains("3");
+
+            var list = new List<string> { "TOAN", "TV", "DD", "GDTC", "AN", "MT", "HDTN", "HĐTN" };
+
+            if (laKhoi12)
+            {
+                list.Add("TNXH");
+                list.Add("ANH");
+            }
+            else if (laKhoi3)
+            {
+                list.Add("TNXH");
+                list.Add("ANH");
+                list.Add("TIN");
+                list.Add("CN");
+            }
+            else
+            {
+                list.Add("KH");
+                list.Add("LSĐL");
+                list.Add("ANH");
+                list.Add("TIN");
+                list.Add("CN");
+            }
+
+            return list;
+        }
+
         public class NhapDiemDto
         {
             public string? MaHS { get; set; }
